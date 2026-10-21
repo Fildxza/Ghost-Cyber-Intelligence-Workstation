@@ -36,7 +36,8 @@ class ApiTests(GhostTestCase):
         self.assertGreaterEqual(s["database"]["schema_version"], 1)
         tshark = next(t for t in s["tools"] if t["id"] == "tshark")
         self.assertTrue((not tshark["installed"]) or tshark["path"])
-        self.assertTrue(all(not p["configured"] for p in s["providers"]))
+        self.assertTrue(all(not p["configured"] for p in s["providers"] if p["needs_key"]), "no keys in the test environment")
+        self.assertTrue(all(p["configured"] for p in s["providers"] if not p["needs_key"]))
         self.assertFalse(s["ai"]["configured"])
         self.assertEqual(s["vault"]["encryption"], "disabled")
 
@@ -125,6 +126,20 @@ class ApiTests(GhostTestCase):
         r = self.c.get("/api/health", headers={"Host": "attacker.example"})
         self.assertEqual(r.status_code, 400)
 
+    def test_sample_endpoint_and_geolocate_flag(self):
+        from ghost.services import osint
+        calls = {}
+        with mock.patch.object(osint, "start_domain_investigation", lambda *a, **k: calls.update(args=a, kw=k) or {"ref": "OP-1", "id": 1}), \
+             mock.patch("ghost.services.intel.start_enrichment", lambda *a, **k: {"ref": "OP-2"}):
+            r = self.c.post("/api/sample")
+            self.assertEqual(r.status_code, 201)
+            self.assertTrue(calls["kw"]["geolocate"])
+            self.assertEqual(self.c.post("/api/sample").status_code, 409)
+        with mock.patch.object(osint, "start_domain_investigation", lambda *a, **k: calls.update(kw2=k) or {"ref": "OP-3"}):
+            self.c.post("/api/osint/domain", json={"domain": "example.com", "geolocate": True})
+            self.assertTrue(calls["kw2"]["geolocate"])
+            self.assertEqual(self.c.post("/api/osint/domain", json={"domain": "example.com", "geolocate": "yes"}).status_code, 422)
+
     def test_ai_unconfigured_is_a_proper_unavailable_state(self):
         cid = self.c.post("/api/cases", json={"name": "AI case"}).get_json()["id"]
         r = self.c.post("/api/ai/analyse", json={"case_id": cid, "task": "summarise"})
@@ -171,7 +186,7 @@ class CliTests(GhostTestCase):
 
     def test_error_exit_codes(self):
         self.assertEqual(self.invoke("case", "show", "999").exit_code, 1)
-        res = self.invoke("intel", "enrich", "evil.com")
+        res = self.invoke("intel", "enrich", "http://evil.example/x")
         self.assertEqual(res.exit_code, 3)
         self.assertIn("No enrichment provider", res.output)
         self.assertEqual(self.invoke("osint", "domain", "http://bad").exit_code, 1)

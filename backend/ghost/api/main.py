@@ -13,7 +13,7 @@ from .. import __version__
 from ..config import get_settings
 from ..db import db, migrate, rows_to_dicts
 from ..errors import GhostError, NotFound
-from ..services import (ai, cases, command, evidence, findings, intel, operations, osint, pcap, reports, system)
+from ..services import (ai, cases, command, evidence, findings, intel, operations, osint, pcap, reports, sample, system)
 
 log = logging.getLogger("ghost.api")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -363,8 +363,14 @@ def review_finding(finding_id: int):
 def osint_domain():
     d = body()
     op = osint.start_domain_investigation(text(d, "domain", required=True, max_len=253), integer(d, "case_id"),
-                                          flag(d, "active"), text(d, "authorisation_note", max_len=500) or "")
+                                          flag(d, "active"), text(d, "authorisation_note", max_len=500) or "",
+                                          geolocate=flag(d, "geolocate") if "geolocate" in d else False)
     return jsonify(op), 202
+
+
+@app.post("/api/sample")
+def load_sample_case():
+    return jsonify(sample.load_sample()), 201
 
 
 def _ioc_type(d: dict) -> str | None:

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FilePlus2, FileText, Globe, Share2, Network, ShieldAlert, Activity, FolderOpen, Cpu, Database, Wrench, Briefcase, ScrollText, Layers } from "lucide-react";
-import { Overview, get, qs } from "../api";
+import { Overview, get, post, qs } from "../api";
 import { useApp } from "../state";
 import { ago, fmtNum, useLoad, utc, utcTime } from "../lib";
 import { Badge, Button, Dot, Empty, ErrorNote, Loading, Metric, Panel, StatusBadge, cx, priorityTone } from "../ui";
@@ -36,15 +36,25 @@ function Health() {
 }
 
 export default function Command() {
-  const { status, workspace } = useApp();
+  const { status, workspace, notify, fail } = useApp();
   const nav = useNavigate();
   const [newCase, setNewCase] = useState(false);
   const [report, setReport] = useState(false);
+  const [sampling, setSampling] = useState(false);
   const [view, setView] = useState<"map" | "topology">("map");
   const ov = useLoad(() => get<Overview>(`/command/overview${qs({ workspace_id: workspace?.id })}`), [workspace?.id], 8000);
   const d = ov.data;
   const m = d?.metrics;
   const sid = status.data?.session_id ?? "OPS-—";
+
+  const loadSample = async () => {
+    setSampling(true);
+    try {
+      const r = await post<{ case: { id: number; ref: string } }>("/sample");
+      notify("ok", `Sample case ${r.case.ref} created — real lookups are running`);
+      nav(`/cases/${r.case.id}`);
+    } catch (e) { fail(e); } finally { setSampling(false); }
+  };
 
   const actions = [
     { label: "Create Case", icon: <FilePlus2 size={14} />, run: () => setNewCase(true) },
@@ -131,7 +141,7 @@ export default function Command() {
       <div className="grid gap-3 xl:grid-cols-12">
         <Panel title="Recent investigations" className="xl:col-span-7" flush right={<Link to="/cases" className="label !text-lime hover:underline">ALL CASES →</Link>}>
           {!d ? <Loading /> : d.recent_cases.length === 0 ? (
-            <div className="p-3"><Empty icon={<FolderOpen size={22} />} title="No investigations yet" action={<Button variant="primary" icon={<FilePlus2 size={13} />} onClick={() => setNewCase(true)}>Create first case</Button>}>Cases hold your scope, notes, findings and evidence. Everything is stored locally in SQLite.</Empty></div>
+            <div className="p-3"><Empty icon={<FolderOpen size={22} />} title="No investigations yet" action={<div className="flex flex-wrap justify-center gap-2"><Button variant="primary" icon={<FilePlus2 size={13} />} onClick={() => setNewCase(true)}>Create first case</Button><Button busy={sampling} icon={<Globe size={13} />} onClick={loadSample}>Load sample investigation</Button></div>}>Cases hold your scope, notes, findings and evidence. Everything is stored locally in SQLite. The sample runs real passive lookups against example.com (needs internet).</Empty></div>
           ) : (
             <div className="overflow-x-auto">
               <table className="dt">

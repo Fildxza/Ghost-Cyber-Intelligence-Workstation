@@ -131,6 +131,54 @@ class OperationTests(GhostTestCase):
         self.assertIn("Interrupted", got["error"])
 
 
+class CertificateTransparencyFallbackTests(GhostTestCase):
+    def test_falls_back_to_certspotter_when_crtsh_is_down(self):
+        with mock.patch.object(osint, "_ct_crtsh", boom("crt.sh responded with HTTP 502", 502, "provider_error")), \
+             mock.patch.object(osint, "_ct_certspotter", lambda d: {"provider": "certspotter", "certificates_logged": 2, "distinct_names": ["a.example.com"], "issuers": {}, "query_url": "u"}), \
+             mock.patch("time.sleep", lambda s: None):
+            data = osint._ct_step("example.com")
+        self.assertEqual(data["provider"], "certspotter")
+        self.assertIn("502", data["fallback_reason"])
+
+    def test_reports_both_failures_when_everything_is_down(self):
+        with mock.patch.object(osint, "_ct_crtsh", boom("crt.sh down", 502, "provider_error")), \
+             mock.patch.object(osint, "_ct_certspotter", boom("certspotter down", 502, "provider_error")), mock.patch("time.sleep", lambda s: None):
+            with self.assertRaises(GhostError) as e:
+                osint._ct_step("example.com")
+        self.assertIn("crt.sh down", e.exception.message)
+        self.assertIn("certspotter down", e.exception.message)
+
+
+class GeolocateAndSampleTests(GhostTestCase):
+    def test_investigation_geolocates_resolved_ips_when_asked(self):
+        from ghost.services import intel
+        c = cases.create_case("Geo investigation")
+        seen = {}
+
+        def fake_geo(ips, case_id, op_id, check_cancel=lambda: None):
+            seen["ips"] = ips
+            return [{"ip": ip, "status": "ok", "label": "Somewhere"} for ip in ips]
+        with mock.patch.object(osint, "_dns_step", lambda d: ({"A": ["93.184.216.34"], "AAAA": ["2606:2800::1"]}, [])), \
+             mock.patch.object(osint, "_rdap_step", boom("x", 404, "not_found")), mock.patch.object(osint, "_ct_step", boom("x", 502, "provider_error")), \
+             mock.patch.object(intel, "geolocate_ips", fake_geo):
+            done = operations.wait_for(osint.start_domain_investigation("example.com", c["id"], geolocate=True)["id"], 20)
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(seen["ips"], ["93.184.216.34", "2606:2800::1"])
+        self.assertEqual({s["step"]: s["status"] for s in done["result"]["steps"]}["geolocation"], "ok")
+
+    def test_sample_loads_once_and_is_tagged(self):
+        from ghost.services import sample
+        started = {}
+        with mock.patch.object(osint, "start_domain_investigation", lambda *a, **k: started.setdefault("op", {"ref": "OP"})), \
+             mock.patch("ghost.services.intel.start_enrichment", lambda *a, **k: {"ref": "OP2"}):
+            r = sample.load_sample()
+            self.assertEqual(r["case"]["tags"], ["sample"])
+            self.assertFalse(r["case"]["authorisation_ack"], "must not attest authorisation on the user's behalf")
+            with self.assertRaises(GhostError) as e:
+                sample.load_sample()
+        self.assertEqual(e.exception.code, "already_loaded")
+
+
 class FindingTests(GhostTestCase):
     def test_review_workflow(self):
         c = cases.create_case("Review case")

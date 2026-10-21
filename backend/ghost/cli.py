@@ -16,7 +16,7 @@ from . import __version__
 from .config import get_settings
 from .db import migrate
 from .errors import GhostError
-from .services import (cases, evidence, findings, intel, operations, osint, pcap, reports, system)  # noqa: F401  (handlers register on import)
+from .services import (cases, evidence, findings, intel, operations, osint, pcap, reports, sample, system)  # noqa: F401  (handlers register on import)
 
 json_opt = click.option("--json", "as_json", is_flag=True, help="Machine-readable JSON output.")
 
@@ -45,6 +45,17 @@ def table(headers: list[str], rows: list[list[Any]]) -> None:
     say("  ".join("-" * w for w in widths))
     for r in cols[1:]:
         say(line(r))
+
+
+def write_output(path: Path, data: str | bytes) -> None:
+    """Write a user-specified output file; turn OS errors into a clean message instead of a traceback."""
+    try:
+        if isinstance(data, bytes):
+            path.write_bytes(data)
+        else:
+            path.write_text(data, encoding="utf-8")
+    except OSError as exc:
+        raise GhostError(f"Cannot write {path}: {exc.strerror or exc}", 1, "write_failed")
 
 
 def guarded(fn):
@@ -139,6 +150,15 @@ def serve(host: str | None, port: int | None):
     run_simple(host or s.host, port or s.port, flask_app, threaded=True, use_reloader=False)
 
 
+@app.command("sample")
+@json_opt
+@guarded
+def sample_cmd(as_json):
+    """Create a sample case and run REAL passive lookups against example.com (needs internet)."""
+    r = sample.load_sample()
+    emit(r, as_json, lambda d: say(f"sample case {d['case']['ref']} created; investigation {d['investigation']['ref']} and enrichment {d['enrichment']['ref']} queued", fg="green"))
+
+
 # --- cases ---------------------------------------------------------------------------
 
 @app.group("case", help="Case management.")
@@ -197,12 +217,13 @@ def osint_group():
 @click.option("--case", "case_id", type=int, default=None, help="Case ID to attach findings to.")
 @click.option("--active", is_flag=True, help="Also perform direct TLS + HTTP checks (needs an authorised case).")
 @click.option("--authorisation", default="", help="Who authorised active testing of this target.")
+@click.option("--geolocate", is_flag=True, help="Also geolocate resolved IPs via ipwho.is (third-party lookup; creates map pins).")
 @click.option("--timeout", type=float, default=120)
 @json_opt
 @guarded
-def osint_domain(domain, case_id, active, authorisation, timeout, as_json):
+def osint_domain(domain, case_id, active, authorisation, geolocate, timeout, as_json):
     """Investigate a domain: DNS, RDAP, certificate transparency (+TLS/HTTP with --active)."""
-    op = osint.start_domain_investigation(domain, case_id, active, authorisation)
+    op = osint.start_domain_investigation(domain, case_id, active, authorisation, geolocate)
     finish_operation(await_op(op, as_json, timeout), as_json)
 
 
@@ -261,7 +282,7 @@ def intel_export(fmt, case_id, output):
     """Export indicators to JSON or CSV."""
     content, _media, _name = intel.export_indicators(fmt, case_id)
     if output:
-        output.write_text(content, encoding="utf-8")
+        write_output(output, content)
         say(f"wrote {output}")
     else:
         click.echo(content)
@@ -296,7 +317,7 @@ def network_analyze(capture, case_id, engine, output, timeout, as_json):
         raise
     done = await_op(op, as_json, timeout)
     if output and done["result"]:
-        output.write_text(json.dumps(done["result"], indent=2, default=str), encoding="utf-8")
+        write_output(output, json.dumps(done["result"], indent=2, default=str))
     if not as_json and done["status"] == "completed":
         r = done["result"]
         a = r["analysis"]
@@ -372,7 +393,7 @@ def report_generate(case_id, output, as_json):
     r = reports.generate(case_id)
     path = get_settings().report_dir / r["filename"]
     if output:
-        output.write_bytes(path.read_bytes())
+        write_output(output, path.read_bytes())
     emit({**r, "path": str(output or path)}, as_json, lambda d: say(f"generated {d['ref']} -> {d['path']}  (sha256 {d['sha256'][:16]}...)", fg="green"))
 
 

@@ -13,6 +13,7 @@ export default function Osint() {
   const [domain, setDomain] = useState("");
   const [caseId, setCaseId] = useState<number | "">(sp.get("case") ? Number(sp.get("case")) : "");
   const [active, setActive] = useState(false);
+  const [geolocate, setGeolocate] = useState(false);
   const [authNote, setAuthNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +30,7 @@ export default function Osint() {
     setBusy(true);
     setError(null);
     try {
-      const op = await post<Operation>("/osint/domain", { domain, case_id: caseId === "" ? null : caseId, active, authorisation_note: authNote });
+      const op = await post<Operation>("/osint/domain", { domain, case_id: caseId === "" ? null : caseId, active, authorisation_note: authNote, geolocate });
       setSp({ sel: String(op.id), ...(caseId ? { case: String(caseId) } : {}) });
       notify("info", `${op.ref} queued`);
       recent.reload();
@@ -54,6 +55,9 @@ export default function Osint() {
                   {(cases.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.ref} — {c.name}</option>)}
                 </Select>}
               </Field>
+              <div className="border border-line bg-bg2 p-3">
+                <Check checked={geolocate} onChange={setGeolocate}><b>Geolocate resolved IPs</b> — plots them on the map. Sends the resolved IP addresses to ipwho.is (third-party lookup, no key).</Check>
+              </div>
               <div className={cx("space-y-2 border p-3", active ? "border-amber/50 bg-amber/[0.04]" : "border-line bg-bg2")}>
                 <Check checked={active} onChange={setActive} disabled={!authorised}>
                   <b>Include active checks</b> — direct TLS handshake and HTTPS request to the target.

@@ -134,8 +134,7 @@ await step("OSINT: active checks need authorisation statement; blocked for loopb
   await hasText("authorisation statement");
   await fill("authorisation statement", "Lab test — own domain");
   await clickText("run investigation", "button[type=submit]");
-  await waitFor(`/completed|failed/.test(document.body.innerText.toLowerCase())`, 90000);
-  await hasText("target blocked by network safety policy");
+  await waitFor(`document.body.innerText.toLowerCase().includes("target blocked by network safety policy")`, 120000);
   await shot("07-osint-ssrf-blocked");
 });
 
@@ -152,7 +151,7 @@ await step("Threat intel: validate/normalise, add, duplicate detection, honest n
   await fill("indicator", "203.0.113.50"); await sleep(400); await clickText("add", "form button[type=submit]"); await inputCleared();
   await fill("indicator", "d41d8cd98f00b204e9800998ecf8427e"); await sleep(400); await clickText("add", "form button[type=submit]"); await inputCleared();
   await fill("indicator", "999.1.1.1"); await select("type", "ip"); await hasText("not a valid ip");
-  await hasText("enrichment unavailable");
+  await hasText("reputation verdicts unavailable");
   const r = await api("/intel/indicators"); if (r.j.length !== 4) throw new Error("expected 4 indicators, got " + r.j.length);
   await shot("08-intel");
 });
@@ -304,6 +303,22 @@ await step("Command Centre with real data (final look)", async () => {
   await goto("/"); await sleep(1500); await hasText("phishing infrastructure review");
   await shot("20-command-final");
   const m = await ev(`document.body.innerText`); if (/NaN|undefined|object Object/.test(m)) throw new Error("rendering artefact in text");
+});
+
+await step("Sample investigation: real lookups produce real map pins", async () => {
+  await api("/system/backup", { method: "POST" });
+  const r = await api("/sample", { method: "POST" });
+  if (r.s !== 201) throw new Error("sample failed " + J(r));
+  const end = Date.now() + 90000; let ops;
+  while (Date.now() < end) { ops = (await api("/operations?limit=5")).j; if (ops.length >= 2 && ops.slice(0, 2).every((o) => ["completed", "failed"].includes(o.status))) break; await sleep(1500); }
+  const inv = ops.find((o) => o.kind === "domain_investigation" && o.target === "example.com" && o.case_id === r.j.case.id);
+  if (!inv || inv.status !== "completed") throw new Error("sample investigation did not complete " + J(inv?.error));
+  const geo = (await api("/command/overview")).j.geo;
+  if (!geo.length) throw new Error("no geolocated pins from the sample");
+  await goto("/"); await clickText("geo map", "[role=tab]"); await sleep(2500);
+  const pins = await ev(`document.querySelectorAll('.geo-pin').length`);
+  if (pins < 1) throw new Error("pins not drawn on the map");
+  await shot("23-geo-pins");
 });
 
 await step("Keyboard: skip link + tab order reach nav; dialog traps focus", async () => {

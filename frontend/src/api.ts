@@ -58,7 +58,7 @@ export const qs = (o: Record<string, string | number | boolean | null | undefine
 // ---- types -----------------------------------------------------------------------
 
 export interface Tool { id: string; name: string; installed: boolean; path: string | null; version: string | null; role: string; install_hint: string | null; error?: string }
-export interface Provider { id: string; name: string; configured: boolean; env: string; types: string[]; setup: string }
+export interface Provider { id: string; name: string; configured: boolean; env: string; types: string[]; setup: string; needs_key: boolean; reputation: boolean; sends_to: string }
 export interface SystemStatus {
   version: string; session_id: string; server_time: string; started_at: string; analyst: string;
   api: { ok: boolean };

@@ -64,6 +64,25 @@ class PcapTests(GhostTestCase):
         self.assertEqual(e.exception.code, "tool_missing")
         self.assertIn("install", e.exception.message.lower())
 
+    def test_tshark_output_parsing_does_not_double_count_dns(self):
+        """A DNS response echoes the question; only the query may be counted, and the answers must be kept."""
+        import subprocess
+        from unittest import mock as m
+        rows = [
+            ["1700000000.0", "70", "192.168.1.10", "", "192.168.1.1", "", "DNS", "", "", "53000", "53", "", "evil.example.org", "1", "", "", "False", "", ""],
+            ["1700000000.2", "86", "192.168.1.1", "", "192.168.1.10", "", "DNS", "", "", "53", "53000", "", "evil.example.org", "1", "", "", "True", "93.184.216.34,93.184.216.35", ""],
+            ["1700000001.0", "74", "192.168.1.10", "", "93.184.216.34", "", "TCP", "40000", "443", "", "", "0x00000002", "", "", "6", "", "", "", ""],
+        ]
+        text = "\n".join("\t".join(r) for r in rows)
+        out = subprocess.CompletedProcess([], 0, stdout=text, stderr="")
+        with m.patch("subprocess.run", return_value=out):
+            a = pcap.analyse_tshark(Path("x.pcap"), "/usr/bin/tshark", [])
+        self.assertEqual(a["packets"], 3)
+        self.assertEqual(a["dns_query_count"], 1)
+        self.assertEqual(a["dns_queries"][0]["answers"], ["A 93.184.216.34", "A 93.184.216.35"])
+        self.assertEqual(a["tcp_endpoints"][0]["syn_in"], 1)
+        self.assertEqual(a["indicators"]["domains"], ["evil.example.org"])
+
     def test_hash_tamper_between_upload_and_analysis_is_refused(self):
         up = pcap.store_upload(io.BytesIO(classic_pcap()), "a.pcap")
         Path(up["path"]).write_bytes(classic_pcap() + b"\x00")

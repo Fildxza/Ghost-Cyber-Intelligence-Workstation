@@ -13,7 +13,7 @@ import re
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from .. import netguard
+from .. import dnsclient, netguard
 from ..config import get_settings
 from ..db import db, next_ref, row_to_dict, rows_to_dicts, utcnow
 from ..errors import GhostError, NotFound, Unavailable
@@ -250,16 +250,130 @@ def query_ipinfo(type_: str, value: str) -> ProviderResult:
     return out
 
 
+def query_ipwho(type_: str, value: str) -> ProviderResult:
+    """Free, key-less IP geolocation + network owner (ipwho.is). Sends the IP to ipwho.is."""
+    url = f"https://ipwho.is/{quote(value)}"
+    code, body, err = _call(url, {"Accept": "application/json"})
+    if err:
+        return ProviderResult(provider="ipwho", status="error", error=err, source_url=url)
+    out = ProviderResult(provider="ipwho", status=_status_from_http(code), http_status=code, source_url=url)
+    if code == 200 and body:
+        if body.get("success") is False:
+            out["status"], out["error"] = "not_found", body.get("message", "lookup unsuccessful")
+        else:
+            conn = body.get("connection") or {}
+            out["data"] = {"city": body.get("city"), "region": body.get("region"), "country": body.get("country"),
+                           "country_code": body.get("country_code"), "latitude": body.get("latitude"), "longitude": body.get("longitude"),
+                           "asn": conn.get("asn"), "org": conn.get("org"), "isp": conn.get("isp"), "domain": conn.get("domain"),
+                           "timezone": (body.get("timezone") or {}).get("id")}
+    elif out["status"] != "not_found":
+        out["error"] = f"HTTP {code}"
+    return out
+
+
+def query_internetdb(type_: str, value: str) -> ProviderResult:
+    """Free, key-less passive exposure data from Shodan InternetDB (ports, CPEs, CVEs, tags). Sends the IP to internetdb.shodan.io."""
+    url = f"https://internetdb.shodan.io/{quote(value)}"
+    code, body, err = _call(url, {"Accept": "application/json"})
+    if err:
+        return ProviderResult(provider="internetdb", status="error", error=err, source_url=url)
+    out = ProviderResult(provider="internetdb", status=_status_from_http(code), http_status=code, source_url=url)
+    if code == 200 and body:
+        out["data"] = {k: body.get(k, []) for k in ("ports", "hostnames", "cpes", "vulns", "tags")}
+    elif out["status"] != "not_found":
+        out["error"] = f"HTTP {code}"
+    return out
+
+
+def query_circl(type_: str, value: str) -> ProviderResult:
+    """Free, key-less known-file lookup (CIRCL hashlookup / NSRL). A hit means 'known file', a miss means nothing. Sends the hash to hashlookup.circl.lu."""
+    algo = {32: "md5", 40: "sha1", 64: "sha256"}[len(value)]
+    url = f"https://hashlookup.circl.lu/lookup/{algo}/{value}"
+    code, body, err = _call(url, {"Accept": "application/json"})
+    if err:
+        return ProviderResult(provider="circl-hashlookup", status="error", error=err, source_url=url)
+    out = ProviderResult(provider="circl-hashlookup", status=_status_from_http(code), http_status=code, source_url=url)
+    if code == 200 and body:
+        out["data"] = {k: body.get(k) for k in ("FileName", "FileSize", "SHA-1", "SHA-256", "MD5", "source", "hashlookup:trust", "ProductCode", "OpSystemCode")}
+    elif out["status"] != "not_found":
+        out["error"] = f"HTTP {code}"
+    return out
+
+
+def _txt(records: list[str]) -> list[str]:
+    return [" ".join(p.strip('"') for p in r.split('" "')).strip('"') for r in records]
+
+
+def query_dns_posture(type_: str, value: str) -> ProviderResult:
+    """Domain posture from DNS only (no third party): address/mail/name-server records plus SPF, DMARC and CAA."""
+    src = f"dns://{value}"
+    try:
+        def get(name: str, rtype: str) -> list[str]:
+            try:
+                return dnsclient.resolve(name, rtype)
+            except dnsclient.NXDomain:
+                if name == value:
+                    raise
+                return []
+        a, aaaa, ns, mx = get(value, "A"), get(value, "AAAA"), get(value, "NS"), get(value, "MX")
+        txt, caa = _txt(get(value, "TXT")), get(value, "CAA")
+        dmarc = _txt(get(f"_dmarc.{value}", "TXT"))
+    except dnsclient.NXDomain:
+        return ProviderResult(provider="dns-posture", status="not_found", http_status=None, source_url=src, error="NXDOMAIN — domain does not exist")
+    except GhostError as exc:
+        return ProviderResult(provider="dns-posture", status="error", source_url=src, error=exc.message)
+    spf = next((t for t in txt if t.lower().startswith("v=spf1")), None)
+    dm = next((t for t in dmarc if t.upper().startswith("V=DMARC1")), None)
+    notes: list[str] = []
+    if spf:
+        notes.append("SPF present" + (" (hard fail -all)" if "-all" in spf else " (soft/neutral)" if ("~all" in spf or "?all" in spf) else ""))
+    else:
+        notes.append("No SPF record")
+    if dm:
+        policy = next((p.split("=", 1)[1] for p in dm.replace(" ", "").split(";") if p.lower().startswith("p=")), "?")
+        notes.append(f"DMARC p={policy}" + (" (monitoring only)" if policy == "none" else ""))
+    else:
+        notes.append("No DMARC record")
+    if mx == ["0 ."]:
+        notes.append("Null MX (domain declares it handles no mail)")
+    notes.append("CAA present" if caa else "No CAA record")
+    return ProviderResult(provider="dns-posture", status="ok", source_url=src,
+                          data={"a": a, "aaaa": aaaa, "ns": ns, "mx": mx, "spf": spf, "dmarc": dm, "caa": caa, "notes": notes})
+
+
+def summarise(res: dict[str, Any]) -> str:
+    d, p = res.get("data") or {}, res["provider"]
+    if p == "ipwho":
+        place = ", ".join(x for x in (d.get("city"), d.get("country")) if x) or "location unknown"
+        return f"{place} · {d.get('org') or d.get('isp') or 'owner unknown'}" + (f" (AS{d['asn']})" if d.get("asn") else "")
+    if p == "internetdb":
+        ports = d.get("ports") or []
+        listed = (" " + ",".join(map(str, ports[:8]))) if ports else ""
+        return f"{len(ports)} exposed port(s){listed} · {len(d.get('vulns') or [])} CVE(s) associated · tags: {', '.join(d.get('tags') or []) or 'none'}"
+    if p == "circl-hashlookup":
+        return f"Known file '{d.get('FileName') or 'unnamed'}' ({d.get('source') or 'unknown source'}, trust {d.get('hashlookup:trust', '?')})"
+    if p == "dns-posture":
+        return "; ".join(d.get("notes", []))
+    return ""
+
+
+# id -> (enabled(settings), supported types, query fn). Key-less providers are always enabled.
 PROVIDERS = {
-    "virustotal": (lambda s: s.vt_api_key, ("domain", "ip", "url", "hash"), query_virustotal),
-    "abuseipdb": (lambda s: s.abuseipdb_api_key, ("ip",), query_abuseipdb),
-    "ipinfo": (lambda s: s.ipinfo_token, ("ip",), query_ipinfo),
+    "virustotal": (lambda s: bool(s.vt_api_key), ("domain", "ip", "url", "hash"), query_virustotal),
+    "abuseipdb": (lambda s: bool(s.abuseipdb_api_key), ("ip",), query_abuseipdb),
+    "ipinfo": (lambda s: bool(s.ipinfo_token), ("ip",), query_ipinfo),
+    "ipwho": (lambda s: True, ("ip",), query_ipwho),
+    "internetdb": (lambda s: True, ("ip",), query_internetdb),
+    "circl-hashlookup": (lambda s: True, ("hash",), query_circl),
+    "dns-posture": (lambda s: True, ("domain",), query_dns_posture),
 }
+# Providers whose verdict can move severity. Others are context only.
+REPUTATION = ("virustotal", "abuseipdb")
 
 
 def available_providers(type_: str) -> list[str]:
     s = get_settings()
-    return [n for n, (key, types, _) in PROVIDERS.items() if key(s) and type_ in types]
+    return [n for n, (enabled, types, _) in PROVIDERS.items() if enabled(s) and type_ in types]
 
 
 # --- scoring -------------------------------------------------------------------
@@ -268,6 +382,7 @@ def score(results: list[dict[str, Any]]) -> tuple[str, str, list[str]]:
     """Explainable verdict: returns (severity, confidence, reasoning[]). Absence of detections is
     never reported as 'safe'."""
     reasons: list[str] = []
+    context: list[str] = []
     sev = -1
     agreeing = 0
 
@@ -304,9 +419,12 @@ def score(results: list[dict[str, Any]]) -> tuple[str, str, list[str]]:
             else:
                 bump("informational", "AbuseIPDB: no abuse reports in the last 90 days.")
         else:
+            context.append(f"{r['provider']}: {summarise(r)} (context only — does not change severity)")
             continue
         agreeing += 1
     if sev < 0:
+        if context:
+            return "unknown", "none", ["No reputation verdict: configure VirusTotal or AbuseIPDB for one. Severity stays unknown — not “safe”.", *context]
         return "unknown", "none", ["No provider returned usable data."]
     confidence = "low" if agreeing <= 1 else "medium"
     if agreeing >= 2:
@@ -318,7 +436,8 @@ def score(results: list[dict[str, Any]]) -> tuple[str, str, list[str]]:
                     bands.add(lvl)
         if bands == {"high"} or bands == {"medium"}:
             confidence = "high"
-    reasons.append(f"Confidence {confidence}: {agreeing} source(s) responded." + (" Single source — corroborate before acting." if agreeing == 1 else ""))
+    reasons.append(f"Confidence {confidence}: {agreeing} reputation source(s) responded." + (" Single source — corroborate before acting." if agreeing == 1 else ""))
+    reasons.extend(context)
     inv = {v: k for k, v in SEVERITY_ORDER.items()}
     return inv[sev], confidence, reasons
 
@@ -336,6 +455,46 @@ def start_enrichment(ind_id: int, case_id: int | None = None) -> dict[str, Any]:
     return operations.create("ioc_enrichment", f"{ind['type']}:{ind['value']}", case_id=cid, params={"indicator_id": ind_id})
 
 
+def extract_geo(res: dict[str, Any]) -> tuple[float, float, str] | None:
+    """(lat, lon, label) from a successful ipinfo / ipwho response, validated to real coordinate ranges."""
+    d = res.get("data") or {}
+    try:
+        if res["provider"] == "ipinfo" and d.get("loc") and "," in d["loc"]:
+            lat, lon = (float(x) for x in d["loc"].split(",", 1))
+        elif res["provider"] == "ipwho" and d.get("latitude") is not None and d.get("longitude") is not None:
+            lat, lon = float(d["latitude"]), float(d["longitude"])
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return lat, lon, ", ".join(x for x in (d.get("city"), d.get("country")) if x)
+
+
+def geolocate_ips(ips: list[str], case_id: int | None, operation_id: int | None, check_cancel=lambda: None) -> list[dict[str, Any]]:
+    """Register public IPs as indicators and geolocate them via ipwho.is (map pins). Returns per-IP outcomes."""
+    out: list[dict[str, Any]] = []
+    for ip in ips:
+        check_cancel()
+        if not netguard.is_public_ip(ip):
+            out.append({"ip": ip, "status": "skipped", "error": "non-public address"})
+            continue
+        ind = add_indicator(ip, "ip", case_id)
+        res = query_ipwho("ip", ip)
+        now = utcnow()
+        with db() as c:
+            c.execute("INSERT INTO enrichments(indicator_id, provider, status, http_status, data, error, source_url, retrieved_at) VALUES (?,?,?,?,?,?,?,?)",
+                      (ind["id"], res["provider"], res["status"], res.get("http_status"), json.dumps(res.get("data") or {}), res.get("error"), res.get("source_url"), now))
+            geo = extract_geo(res) if res["status"] == "ok" else None
+            if geo:
+                c.execute("UPDATE indicators SET geo_lat=?, geo_lon=?, geo_label=? WHERE id=?", (*geo, ind["id"]))
+                findings.add_finding(c, kind="geolocation", title=f"Geolocation — {ip}", summary=summarise(res), data=res["data"], source="ipwho.is",
+                                     source_url=res.get("source_url"), retrieved_at=now, confidence="low", case_id=case_id, operation_id=operation_id)
+        out.append({"ip": ip, "status": "ok" if geo else (res["status"] if res["status"] != "ok" else "no_coordinates"), "label": geo[2] if geo else None, "error": res.get("error")})
+    return out
+
+
 @operations.register("ioc_enrichment")
 def run_enrichment(ctx: operations.OperationContext) -> dict[str, Any]:
     ind = get_indicator(ctx.params["indicator_id"])
@@ -351,7 +510,7 @@ def run_enrichment(ctx: operations.OperationContext) -> dict[str, Any]:
         if not key(s):
             provider_status.append({"provider": name, "status": "unconfigured"})
             continue
-        if private:
+        if private and name != "dns-posture":
             provider_status.append({"provider": name, "status": "skipped", "error": "Private/reserved address — not sent to third parties"})
             continue
         res = fn(t, v)
@@ -359,6 +518,7 @@ def run_enrichment(ctx: operations.OperationContext) -> dict[str, Any]:
         provider_status.append({"provider": name, "status": res["status"], "http_status": res.get("http_status"), "error": res.get("error")})
     severity, confidence, reasoning = score(results)
     now = utcnow()
+    geo_done = False
     with db() as c:
         for res in results:
             c.execute(
@@ -368,16 +528,14 @@ def run_enrichment(ctx: operations.OperationContext) -> dict[str, Any]:
             if res["status"] == "ok":
                 findings.add_finding(
                     c, kind="ioc_enrichment", title=f"{res['provider']} — {v}", source=res["provider"],
-                    summary=next((r for r in reasoning if r.lower().startswith(res["provider"].lower()[:6])), ""),
+                    summary=summarise(res) or next((r for r in reasoning if r.lower().startswith(res["provider"].lower()[:6])), ""),
                     data=res.get("data") or {}, source_url=res.get("source_url"), retrieved_at=now,
                     confidence="medium", case_id=ctx.case_id, operation_id=ctx.id)
-            if res["provider"] == "ipinfo" and res["status"] == "ok":
-                loc = (res.get("data") or {}).get("loc")
-                if loc and "," in loc:
-                    lat, lon = (float(x) for x in loc.split(",", 1))
-                    d = res["data"]
-                    label = ", ".join(x for x in (d.get("city"), d.get("country")) if x)
-                    c.execute("UPDATE indicators SET geo_lat=?, geo_lon=?, geo_label=? WHERE id=?", (lat, lon, label, ind["id"]))
+            if res["status"] == "ok" and not geo_done:  # first successful source wins (keyed ipinfo is listed before key-less ipwho)
+                geo = extract_geo(res)
+                if geo:
+                    c.execute("UPDATE indicators SET geo_lat=?, geo_lon=?, geo_label=? WHERE id=?", (*geo, ind["id"]))
+                    geo_done = True
         if results and any(r["status"] == "ok" for r in results):
             c.execute("UPDATE indicators SET severity=?, confidence=?, reasoning=?, last_seen=? WHERE id=?",
                       (severity, confidence, json.dumps(reasoning), now, ind["id"]))

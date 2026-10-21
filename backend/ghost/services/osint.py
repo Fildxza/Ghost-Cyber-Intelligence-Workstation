@@ -18,7 +18,7 @@ from cryptography.x509.oid import ExtensionOID, NameOID
 from .. import dnsclient, netguard
 from ..db import db, utcnow
 from ..errors import GhostError
-from . import cases, findings, operations, system
+from . import cases, findings, intel, operations, system
 from .findings import link, upsert_entity
 
 DNS_TYPES = ("A", "AAAA", "NS", "MX", "TXT", "CNAME", "SOA", "CAA")
@@ -27,7 +27,7 @@ SECURITY_HEADERS = ("strict-transport-security", "content-security-policy", "x-f
 
 
 def start_domain_investigation(domain: str, case_id: int | None = None, active: bool = False,
-                               authorisation_note: str = "") -> dict[str, Any]:
+                               authorisation_note: str = "", geolocate: bool = False) -> dict[str, Any]:
     domain = netguard.normalise_domain(domain)
     system.ensure_online("domain investigation")
     if active:
@@ -35,7 +35,7 @@ def start_domain_investigation(domain: str, case_id: int | None = None, active: 
         if not authorisation_note.strip():
             raise GhostError("Active checks need an authorisation statement (who authorised testing of this target).",
                              403, "authorisation_required")
-    return operations.create("domain_investigation", domain, case_id=case_id, params={"active": active},
+    return operations.create("domain_investigation", domain, case_id=case_id, params={"active": active, "geolocate": geolocate},
                              authorised=active, auth_note=authorisation_note)
 
 
@@ -86,7 +86,7 @@ def _rdap_step(domain: str) -> dict[str, Any]:
     }
 
 
-def _ct_step(domain: str) -> dict[str, Any]:
+def _ct_crtsh(domain: str) -> dict[str, Any]:
     url = f"https://crt.sh/?q=%25.{domain}&output=json"
     resp = netguard.safe_fetch(url, max_bytes=4 * 1024 * 1024)  # CT result sets are large; still bounded
     if resp.status == 429:
@@ -107,8 +107,53 @@ def _ct_step(domain: str) -> dict[str, Any]:
             if n.endswith(domain):
                 names.add(n)
         issuers[row.get("issuer_name", "?")] = issuers.get(row.get("issuer_name", "?"), 0) + 1
-    return {"certificates_logged": len(rows), "distinct_names": sorted(names)[:500],
+    return {"provider": "crt.sh", "certificates_logged": len(rows), "distinct_names": sorted(names)[:500],
             "issuers": dict(sorted(issuers.items(), key=lambda kv: -kv[1])[:10]), "query_url": url}
+
+
+def _ct_certspotter(domain: str) -> dict[str, Any]:
+    url = f"https://api.certspotter.com/v1/issuances?domain={domain}&include_subdomains=true&expand=dns_names&expand=issuer"
+    resp = netguard.safe_fetch(url, max_bytes=4 * 1024 * 1024)
+    if resp.status == 429:
+        raise GhostError("Cert Spotter rate limited the request (free tier is limited)", 429, "rate_limited")
+    if resp.status != 200:
+        raise GhostError(f"Cert Spotter responded with HTTP {resp.status}", 502, "provider_error")
+    try:
+        rows = json.loads(resp.body or b"[]")
+    except json.JSONDecodeError:
+        raise GhostError("Cert Spotter returned a non-JSON response", 502, "provider_error")
+    names: set[str] = set()
+    issuers: dict[str, int] = {}
+    for row in rows:
+        for n in row.get("dns_names", []):
+            n = str(n).strip().lower().lstrip("*.")
+            if n.endswith(domain):
+                names.add(n)
+        iss = (row.get("issuer") or {}).get("friendly_name") or (row.get("issuer") or {}).get("name") or "?"
+        issuers[iss] = issuers.get(iss, 0) + 1
+    return {"provider": "certspotter", "certificates_logged": len(rows), "distinct_names": sorted(names)[:500],
+            "issuers": dict(sorted(issuers.items(), key=lambda kv: -kv[1])[:10]), "query_url": url}
+
+
+def _ct_step(domain: str) -> dict[str, Any]:
+    """crt.sh (2 attempts — it is often overloaded) then Cert Spotter. Reports which source answered; fails only if all fail."""
+    import time
+    errors: list[str] = []
+    for attempt in range(2):
+        try:
+            return _ct_crtsh(domain)
+        except GhostError as exc:
+            errors.append(exc.message)
+            if exc.code in ("rate_limited", "too_large"):
+                break
+            time.sleep(1.5)
+    try:
+        data = _ct_certspotter(domain)
+        data["fallback_reason"] = errors[-1] if errors else None
+        return data
+    except GhostError as exc:
+        errors.append(exc.message)
+    raise GhostError("Certificate transparency unavailable: " + " | ".join(dict.fromkeys(errors)), 502, "provider_error")
 
 
 def parse_certificate(der: bytes) -> dict[str, Any]:
@@ -229,6 +274,24 @@ def run(ctx: operations.OperationContext) -> dict[str, Any]:
         steps.append({"step": "dns", "status": "failed" if errs else "empty", "at": started,
                       "error": "; ".join(errs) if errs else "No DNS records returned (domain may not exist)"})
 
+    # Optional geolocation of resolved addresses (third-party lookup: ipwho.is) -> real map pins ---------
+    if ctx.params.get("geolocate"):
+        ctx.check_cancel()
+        started = utcnow()
+        ips = [ip for rt in ("A", "AAAA") for ip in records.get(rt, [])][:8]
+        if not ips:
+            steps.append({"step": "geolocation", "status": "skipped", "at": started, "error": "No A/AAAA records to geolocate"})
+        else:
+            try:
+                outcome = intel.geolocate_ips(ips, ctx.case_id, ctx.id, ctx.check_cancel)
+            except operations.Cancelled:
+                raise
+            except GhostError as exc:
+                outcome = [{"ip": "*", "status": "failed", "error": exc.message}]
+            good = [o for o in outcome if o["status"] == "ok"]
+            steps.append({"step": "geolocation", "status": "ok" if good else "failed", "at": started, "detail": outcome,
+                          **({} if good else {"error": "; ".join(f"{o['ip']}: {o.get('error') or o['status']}" for o in outcome)[:300]})})
+
     # RDAP -----------------------------------------------------------------------
     def rdap_rel(c, fref, data):
         for ns in data.get("nameservers", []):
@@ -243,10 +306,10 @@ def run(ctx: operations.OperationContext) -> dict[str, Any]:
     def ct_rel(c, fref, data):
         for name in data["distinct_names"][:50]:
             if name != domain:
-                link(c, dom_ent, upsert_entity(c, "domain", name), "ct_logged_name", "crt.sh (Certificate Transparency)", fref)
-    record("certificate_transparency", lambda: _ct_step(domain), source="crt.sh (Certificate Transparency)",
+                link(c, dom_ent, upsert_entity(c, "domain", name), "ct_logged_name", f"Certificate Transparency ({data.get('provider')})", fref)
+    record("certificate_transparency", lambda: _ct_step(domain), source="Certificate Transparency (crt.sh / Cert Spotter)",
            source_url=f"https://crt.sh/?q=%25.{domain}", confidence="medium", title=f"Certificate transparency — {domain}",
-           summarise=lambda d: f"{d['certificates_logged']} logged certificates, {len(d['distinct_names'])} distinct names",
+           summarise=lambda d: f"{d['certificates_logged']} logged certificates, {len(d['distinct_names'])} distinct names (via {d.get('provider')})",
            relate=ct_rel)
 
     if active:

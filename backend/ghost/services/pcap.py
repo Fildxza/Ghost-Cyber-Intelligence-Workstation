@@ -357,8 +357,9 @@ def analyse_builtin(path: Path, fmt: str, warnings: list[str], ctx: operations.O
 
 def analyse_tshark(path: Path, tshark: str, warnings: list[str], ctx: operations.OperationContext | None = None) -> dict[str, Any]:
     fields = ["frame.time_epoch", "frame.len", "ip.src", "ipv6.src", "ip.dst", "ipv6.dst", "_ws.col.Protocol",
-              "tcp.srcport", "tcp.dstport", "udp.srcport", "udp.dstport", "tcp.flags", "dns.qry.name", "dns.qry.type", "ip.proto", "ipv6.nxt"]
-    cmd = [tshark, "-n", "-r", str(path), "-T", "fields", "-E", "separator=/t", "-E", "occurrence=f"]
+              "tcp.srcport", "tcp.dstport", "udp.srcport", "udp.dstport", "tcp.flags", "dns.qry.name", "dns.qry.type", "ip.proto", "ipv6.nxt",
+              "dns.flags.response", "dns.a", "dns.aaaa"]
+    cmd = [tshark, "-n", "-r", str(path), "-T", "fields", "-E", "separator=/t", "-E", "occurrence=a", "-E", "aggregator=,"]
     for f in fields:
         cmd += ["-e", f]
     timeout = get_settings().pcap_timeout
@@ -378,7 +379,9 @@ def analyse_tshark(path: Path, tshark: str, warnings: list[str], ctx: operations
             warnings.append(f"Packet limit reached ({MAX_PACKETS:,}).")
             break
         p = (line.split("\t") + [""] * len(fields))[:len(fields)]
-        ts_s, ln, s4, s6, d4, d6, l7, tsp, tdp, usp, udp, flags, qname, qtype, ip4p, ip6p = p
+        ts_s, ln, s4, s6, d4, d6, l7, tsp, tdp, usp, udp, flags, qname, qtype, ip4p, ip6p, dns_resp, dns_a, dns_aaaa = p
+        first = lambda v: v.split(",")[0]  # noqa: E731  (occurrence=a joins repeats, e.g. tunnelled headers)
+        ts_s, ln, s4, s6, d4, d6, tsp, tdp, usp, udp, flags, ip4p, ip6p = (first(x) for x in (ts_s, ln, s4, s6, d4, d6, tsp, tdp, usp, udp, flags, ip4p, ip6p))
         src, dst = s4 or s6, d4 or d6
         if not src or not dst:
             agg.add(float(ts_s or 0), {"l3": l7 or "non-IP"})
@@ -395,7 +398,12 @@ def analyse_tshark(path: Path, tshark: str, warnings: list[str], ctx: operations
                 pass
         agg.add(float(ts_s or 0), pkt)
         if qname:
-            agg.add_dns_query(qname, DNS_TYPES.get(int(qtype), qtype) if qtype.isdigit() else qtype)
+            name, qt = first(qname), first(qtype)
+            qtype_name = DNS_TYPES.get(int(qt), qt) if qt.isdigit() else qt
+            if first(dns_resp) in ("1", "True", "true"):  # a response echoes the question: record its answers, don't count a 2nd query
+                agg.dns_answers[name.lower()].update([f"A {a}" for a in dns_a.split(",") if a] + [f"AAAA {a}" for a in dns_aaaa.split(",") if a])
+            else:
+                agg.add_dns_query(name, qtype_name)
         if ctx and i % 50000 == 0:
             ctx.check_cancel()
     return agg.result()

@@ -129,6 +129,16 @@ describe("Topology view", () => {
   });
 });
 
+describe("Sample investigation", () => {
+  it("offers a sample on the empty Command Centre and posts to /api/sample", async () => {
+    let posted = false;
+    mockApi({ ...base, "/api/sample": (init) => { posted = init?.method === "POST"; return json({ case: { id: 5, ref: "GHO-CASE-2026-0005" } }, { status: 201 }); }, "/api/cases/5": () => json({ error: { code: "not_found", message: "x" } }, { status: 404 }) });
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: /load sample investigation/i }));
+    await waitFor(() => expect(posted).toBe(true));
+  });
+});
+
 describe("Navigation shell", () => {
   it("contains all eleven required sections", async () => {
     mockApi(base);
@@ -188,12 +198,16 @@ describe("Modal accessibility", () => {
 describe("Threat intelligence page", () => {
   it("shows an honest unavailable state when no provider is configured", async () => {
     mockApi({
-      ...base, "/api/cases": () => json([]), "/api/intel/providers": () => json([{ id: "virustotal", name: "VirusTotal", configured: false, env: "VIRUSTOTAL_API_KEY", types: ["domain"], setup: "Create a free key and set VIRUSTOTAL_API_KEY" }]),
+      ...base, "/api/cases": () => json([]), "/api/intel/providers": () => json([
+        { id: "virustotal", name: "VirusTotal", configured: false, env: "VIRUSTOTAL_API_KEY", types: ["domain"], setup: "Create a free key and set VIRUSTOTAL_API_KEY", needs_key: true, reputation: true, sends_to: "virustotal.com" },
+        { id: "ipwho", name: "ipwho.is", configured: true, env: "", types: ["ip"], setup: "No key needed.", needs_key: false, reputation: false, sends_to: "ipwho.is" }]),
       "/api/intel/indicators": () => json([]),
     });
     renderApp("/intel");
-    expect(await screen.findByText(/Enrichment unavailable/)).toBeInTheDocument();
-    expect(screen.getAllByText("not configured").length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Reputation verdicts unavailable/)).toBeInTheDocument();
+    expect(screen.getByText("key needed")).toBeInTheDocument();
+    expect(screen.getByText("ready · no key")).toBeInTheDocument();
+    expect(screen.getByText("SENDS TO ipwho.is")).toBeInTheDocument();
     expect(screen.getByText(/Create a free key and set VIRUSTOTAL_API_KEY/)).toBeInTheDocument();
     expect(screen.getByText("No indicators tracked")).toBeInTheDocument();
   });

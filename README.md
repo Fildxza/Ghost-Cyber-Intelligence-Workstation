@@ -24,6 +24,8 @@ anonymity or evasion tool.
 </tr>
 </table>
 
+<img src="docs/screenshots/23-geo-pins.png" alt="Real geolocated pins from a live investigation">
+
 <sub>Screenshots are real captures of the running app (data created through the app itself; DNS/RDAP results are live).</sub>
 
 > **Honesty rule:** every status light, metric and map pin is derived from real state. Nothing is
@@ -31,9 +33,38 @@ anonymity or evasion tool.
 
 ---
 
+## Is it real? What works out of the box
+
+Yes — nothing here is a mock-up. There is no demo data and no fake telemetry. This table says exactly what you can use **today**:
+
+| Capability | Works with no setup? | Notes |
+|---|---|---|
+| Cases, notes, workspaces, audit trail, search, reports, backup | ✅ | Local SQLite; survives restarts |
+| Evidence vault (SHA-256, tamper detection, export) | ✅ | AES-256-GCM at rest if you set `GHOST_VAULT_PASSPHRASE` |
+| Domain investigation: DNS, RDAP, certificate transparency | ✅ internet | crt.sh with automatic Cert Spotter fallback |
+| Active TLS + HTTP checks | ✅ internet | Needs a case with declared scope + authorisation; verified live |
+| IP enrichment: geolocation, owner, exposed ports/CVEs | ✅ internet | ipwho.is + Shodan InternetDB, **no key** → real map pins |
+| Hash enrichment: known-file lookup | ✅ internet | CIRCL hashlookup (NSRL), no key |
+| Domain enrichment: SPF / DMARC / CAA posture | ✅ | Your DNS resolver only |
+| PCAP analysis | ✅ | Built-in parser; **TShark used automatically if installed** (verified with TShark 4.2.2 on Ubuntu/WSL) |
+| Entity graph, animated topology, vector map | ✅ | Offline-capable, no third-party requests |
+| Field Mode | ✅ | Backend refuses all outbound operations |
+| **Malicious / benign reputation verdicts** | ⚙️ needs a key | VirusTotal and/or AbuseIPDB (free keys). Without them severity stays *unknown*, never “safe” |
+| AI analyst | ⚙️ needs a model | Local Ollama or any OpenAI-compatible endpoint |
+| Zeek | ➖ detected only | Not used for analysis yet |
+
+Try it immediately: on the empty Command Centre press **Load sample investigation** (or `ghost sample`). It runs *real* passive lookups against `example.com` — a domain IANA reserves for documentation — and the resulting entities, findings and geolocated pins are genuine.
+
+---
+
 ## 1. Quick start
 
 Requirements: **Python 3.10+**, **Node 20+** (only to build/develop the UI).
+
+**Easiest:** double-click / run `start.cmd` (Windows) or `./start.sh` (Linux, WSL2). It installs missing Python
+dependencies, builds the UI on first run, opens your browser and starts the server on http://127.0.0.1:8787.
+
+Manual steps:
 
 ```powershell
 # Windows (PowerShell), from the project root
@@ -87,8 +118,8 @@ backend/ghost/
   dnsclient.py, dnswire.py   minimal DNS stub client + wire parser (bounds-checked)
   db.py              SQLite, versioned migrations (PRAGMA user_version), portable SQL
   cli.py             `ghost` (click) — calls the same services as the API
-backend/tests/       73 unittest cases        frontend/src/*.test.*   18 vitest cases
-e2e/                24-step real-browser journey (headless Chromium over DevTools protocol)
+backend/tests/       84 unittest cases        frontend/src/*.test.*   19 vitest cases
+e2e/                25-step real-browser journey (headless Chromium over DevTools protocol)
 ```
 
 * One short-lived SQLite connection per unit of work (WAL). Schema SQL avoids SQLite-only features
@@ -107,8 +138,8 @@ e2e/                24-step real-browser journey (headless Chromium over DevTool
 | **Shell** | 11-section nav rail (compact mode), command bar with workspace selector, working global search (cases / indicators / evidence, `/` to focus), local + UTC clocks, status chips (API, tools, vault, link/field mode), analyst menu, bottom status strip (version, API, DB + latency, queue, workspace, last successful operation). Status is polled every 8 s; **API never shows green unless the last poll succeeded**. |
 | **Command Centre** | Generated operation/session ID; 4 metrics; **Geo map** (Leaflet on a bundled Natural Earth vector basemap — no tiles, no third-party requests, works offline; pulsing pins only for provider-geolocated indicators) and an **animated Topology view** (real entities/relationships: markers travel along each link in its recorded direction, amber rings ping entities recorded in the last 15 min — structure and recency, *not* live traffic); 14-day activity timeline from the audit trail; event stream (polled, real timestamps); system health; recent investigations/operations; 5 quick actions, each opens a real form or page. |
 | **Cases** | Create / view / edit / archive / search; backend-issued IDs (`GHO-CASE-2026-0001`); objective, scope, **authorisation declaration**, priority, tags, notes, per-case timeline, findings with review workflow (confirm / dismiss), linked indicators/evidence/operations/reports. Workspaces scope cases. |
-| **OSINT** | DNS (A/AAAA/NS/MX/TXT/CNAME/SOA/CAA via own resolver client), RDAP registration, certificate transparency (crt.sh). **Active** TLS-certificate inspection and HTTPS metadata only for a case with declared scope + authorisation + a stated authoriser. Every finding stores source, URL, retrieval time, confidence, freshness (`live` → `stale` after 24 h). Failed steps are reported, never filled in. |
-| **Threat intel** | Normalisation (accepts defanged `hxxp`, `[.]`), type detection, duplicate detection, VirusTotal / AbuseIPDB / ipinfo providers (keys via env), per-provider status, explainable severity + confidence with reasoning, case linking, CSV/JSON export. Private IPs are never sent to third parties. |
+| **OSINT** | DNS (A/AAAA/NS/MX/TXT/CNAME/SOA/CAA via own resolver client), RDAP registration, certificate transparency (crt.sh, retried, with automatic Cert Spotter fallback), optional geolocation of resolved IPs (map pins). **Active** TLS-certificate inspection and HTTPS metadata only for a case with declared scope + authorisation + a stated authoriser. Every finding stores source, URL, retrieval time, confidence, freshness (`live` → `stale` after 24 h). Failed steps are reported, never filled in. |
+| **Threat intel** | Normalisation (accepts defanged `hxxp`, `[.]`), type detection, duplicate detection, key-less providers (ipwho.is geolocation, Shodan InternetDB exposure, CIRCL hashlookup, DNS posture) plus optional VirusTotal / AbuseIPDB / ipinfo (keys via env); every provider card states what is sent where; only reputation providers move severity, per-provider status, explainable severity + confidence with reasoning, case linking, CSV/JSON export. Private IPs are never sent to third parties. |
 | **Network** | Upload pcap/pcapng (magic-byte check, size cap, SHA-256, random storage name, never executed). Built-in parser: time range, protocol distribution (port-based labels), conversations, DNS queries + answers, TCP endpoints (SYN counts), extracted domains/IPs, warnings; TShark engine when installed. Downloadable JSON. |
 | **Entity graph** | Domains, IPs, URLs, hashes, certificates, cases, evidence. Edges are created only by real operations/analyst actions and carry `rel_type`, `source`, and the finding reference. Cytoscape.js; filter by type/case, search/highlight, zoom, pan, drag, fit, reset, detail panel with every relationship's source. |
 | **Evidence vault** | Register with SHA-256, optional AES-256-GCM encryption at rest, **verification recomputes the hash from stored bytes**, custody activity log, export, delete (audit record keeps name + hash), ZIP backup with SHA-256 manifest. UI states clearly that this is an integrity hash, not a signature or chain-of-custody proof. |
@@ -163,8 +194,8 @@ ghost report generate N [--output report.html]
 ## 6. Testing
 
 ```powershell
-cd backend;  $env:PYTHONPATH="."; python -m unittest discover -s tests     # 73 tests
-cd frontend; npx tsc --noEmit; npx vitest run; npm run build               # types, 18 tests, build
+cd backend;  $env:PYTHONPATH="."; python -m unittest discover -s tests     # 84 tests
+cd frontend; npx tsc --noEmit; npx vitest run; npm run build               # types, 19 tests, build
 ```
 
 Real-browser end-to-end journey (needs a Chromium-based browser, a built UI, and internet for the
@@ -197,11 +228,13 @@ Field Mode enforcement, backup download, global search navigation, workspaces, t
   (instead of Typer), a **built-in DNS client** (instead of dnspython) and **`unittest`** (instead
   of pytest). The service layer is framework-independent, so moving the thin `api/main.py` to
   FastAPI is a mechanical change.
-* **Not verified end-to-end here:** the **TShark engine** (not installed; code path covered only by
-  design), **VirusTotal / AbuseIPDB / ipinfo** (no keys — covered with mocked responses),
-  **AI endpoint** (mocked), **TLS/HTTP active steps** against a real authorised target (parsing and
-  guards are tested; no authorised live target was used). DNS and RDAP were exercised live.
-  crt.sh returned HTTP 502 during testing and is reported as a failed step.
+* **Verified live:** DNS, RDAP, certificate transparency (crt.sh and the Cert Spotter fallback), active
+  TLS + HTTP against `example.com`, the four key-less enrichment providers, geolocation → map pins,
+  the **TShark engine** (TShark 4.2.2 under Ubuntu/WSL2, matching the built-in parser's packet and
+  conversation counts) and the whole test suite on Linux (WSL2).
+* **Not verified end-to-end (no keys / no model here):** **VirusTotal / AbuseIPDB / ipinfo** (covered
+  with mocked responses) and the **AI endpoint** (mocked). Public services can rate-limit or be down;
+  failures are reported per step, never filled in.
 * **Zeek** is detected only; it is not used for analysis.
 * Built-in PCAP protocol labels come from well-known ports, not deep inspection; no TCP
   reassembly, TLS/HTTP dissection or IPv4 fragment reassembly. Cap: 3 M packets.
@@ -222,10 +255,9 @@ Field Mode enforcement, backup download, global search navigation, workspaces, t
 
 ## 8. Recommended next task
 
-1. Install TShark and run the PCAP workflow against a real capture; compare against the built-in
-   engine and add Zeek log ingestion.
-2. Add real provider keys and a local Ollama model; exercise enrichment and AI analyst end-to-end.
-3. Run an **authorised** active investigation to validate TLS/HTTP steps against a live target.
+1. Add a VirusTotal and/or AbuseIPDB key to `.env` to get real reputation verdicts.
+2. Add a local Ollama model (or any OpenAI-compatible endpoint) to enable the AI analyst.
+3. Run the PCAP workflow on a real capture; consider Zeek log ingestion.
 4. Consider FastAPI/Typer + pytest migration if you prefer that stack (service layer is unchanged).
 5. Optional: session lock + DB-at-rest encryption (SQLCipher) for true Field Mode.
 

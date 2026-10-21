@@ -105,8 +105,8 @@ export default function Toolkit() {
           <Panel title="Threat-intel providers" flush>
             {!s ? <Loading /> : <ul>{s.providers.map((p) => (
               <li key={p.id} className="border-b border-line px-3 py-2.5 last:border-0">
-                <div className="flex items-center justify-between"><span className="text-[13px]">{p.name}</span><Badge tone={p.configured ? "lime" : "amber"}>{p.configured ? "key configured" : "not configured"}</Badge></div>
-                <div className="mono text-[10.5px] text-dim">{p.types.join(" · ")} · {p.env}</div>{!p.configured && <div className="mt-1 text-[11.5px] text-mute">{p.setup}</div>}
+                <div className="flex items-center justify-between"><span className="text-[13px]">{p.name}</span><Badge tone={p.configured ? "lime" : "amber"}>{p.configured ? (p.needs_key ? "key configured" : "ready · no key") : "key needed"}</Badge></div>
+                <div className="mono text-[10.5px] text-dim">{p.types.join(" · ")} · {p.env || "no key required"} · sends to {p.sends_to}</div>{!p.configured && <div className="mt-1 text-[11.5px] text-mute">{p.setup}</div>}
               </li>))}</ul>}
             <div className="border-t border-line px-3 py-2 text-[11px] text-dim">Configured means a key is present — it is verified only when a request is made. Keys never leave the backend.</div>
           </Panel>

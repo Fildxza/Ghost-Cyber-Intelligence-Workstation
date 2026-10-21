@@ -73,16 +73,28 @@ def tools() -> list[dict[str, Any]]:
     ]
 
 
+PROVIDER_INFO = [
+    {"id": "virustotal", "name": "VirusTotal", "env": "VIRUSTOTAL_API_KEY", "types": ["domain", "ip", "url", "hash"], "needs_key": True, "reputation": True,
+     "sends_to": "virustotal.com", "setup": "Create a free key at virustotal.com and set VIRUSTOTAL_API_KEY in .env"},
+    {"id": "abuseipdb", "name": "AbuseIPDB", "env": "ABUSEIPDB_API_KEY", "types": ["ip"], "needs_key": True, "reputation": True,
+     "sends_to": "abuseipdb.com", "setup": "Create a free key at abuseipdb.com and set ABUSEIPDB_API_KEY in .env"},
+    {"id": "ipinfo", "name": "ipinfo.io (geolocation)", "env": "IPINFO_TOKEN", "types": ["ip"], "needs_key": True, "reputation": False,
+     "sends_to": "ipinfo.io", "setup": "Create a token at ipinfo.io and set IPINFO_TOKEN in .env. Provides map coordinates."},
+    {"id": "ipwho", "name": "ipwho.is (geolocation + owner)", "env": "", "types": ["ip"], "needs_key": False, "reputation": False,
+     "sends_to": "ipwho.is", "setup": "No key needed. Provides map coordinates and network owner."},
+    {"id": "internetdb", "name": "Shodan InternetDB (exposure)", "env": "", "types": ["ip"], "needs_key": False, "reputation": False,
+     "sends_to": "internetdb.shodan.io", "setup": "No key needed. Open ports, CPEs, associated CVEs. Exposure is not maliciousness."},
+    {"id": "circl-hashlookup", "name": "CIRCL hashlookup (known files)", "env": "", "types": ["hash"], "needs_key": False, "reputation": False,
+     "sends_to": "hashlookup.circl.lu", "setup": "No key needed. A hit means a known file; a miss means nothing."},
+    {"id": "dns-posture", "name": "DNS posture (SPF / DMARC / CAA)", "env": "", "types": ["domain"], "needs_key": False, "reputation": False,
+     "sends_to": "your configured DNS resolver only", "setup": "No key needed; uses your DNS resolver."},
+]
+
+
 def providers() -> list[dict[str, Any]]:
+    from . import intel  # local import: intel depends on this module
     s = get_settings()
-    return [
-        {"id": "virustotal", "name": "VirusTotal", "configured": bool(s.vt_api_key), "env": "VIRUSTOTAL_API_KEY",
-         "types": ["domain", "ip", "url", "hash"], "setup": "Create a free key at virustotal.com and set VIRUSTOTAL_API_KEY in .env"},
-        {"id": "abuseipdb", "name": "AbuseIPDB", "configured": bool(s.abuseipdb_api_key), "env": "ABUSEIPDB_API_KEY",
-         "types": ["ip"], "setup": "Create a free key at abuseipdb.com and set ABUSEIPDB_API_KEY in .env"},
-        {"id": "ipinfo", "name": "ipinfo.io (geolocation)", "configured": bool(s.ipinfo_token), "env": "IPINFO_TOKEN",
-         "types": ["ip"], "setup": "Create a token at ipinfo.io and set IPINFO_TOKEN in .env. Provides map coordinates."},
-    ]
+    return [{**info, "configured": bool(intel.PROVIDERS[info["id"]][0](s))} for info in PROVIDER_INFO]
 
 
 def ai_status() -> dict[str, Any]:

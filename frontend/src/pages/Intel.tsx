@@ -42,6 +42,7 @@ export default function Intel() {
   }, [value, type]);
 
   const anyProvider = (providers.data ?? []).some((p) => p.configured);
+  const reputation = (providers.data ?? []).some((p) => p.configured && p.reputation);
 
   const submit = async (e: FormEvent, enrich: boolean) => {
     e.preventDefault();
@@ -110,12 +111,14 @@ export default function Intel() {
             {!providers.data ? <Loading /> : (
               <ul className="space-y-2">{providers.data.map((p) => (
                 <li key={p.id} className="border border-line px-2.5 py-2">
-                  <div className="flex items-center justify-between"><span className="text-[12.5px]">{p.name}</span><Badge tone={p.configured ? "lime" : "amber"}>{p.configured ? "configured" : "not configured"}</Badge></div>
-                  <div className="mono mt-0.5 text-[10px] text-dim">{p.types.join(" · ")}</div>
+                  <div className="flex items-center justify-between gap-2"><span className="text-[12.5px]">{p.name}</span>
+                    <Badge tone={p.configured ? "lime" : "amber"}>{p.configured ? (p.needs_key ? "key configured" : "ready · no key") : "key needed"}</Badge></div>
+                  <div className="mono mt-0.5 text-[10px] text-dim">{p.types.join(" · ")}{p.reputation ? " · reputation verdict" : " · context only"}</div>
+                  <div className="mono text-[10px] text-dim">SENDS TO {p.sends_to}</div>
                   {!p.configured && <p className="mt-1 text-[11.5px] text-mute">{p.setup}</p>}
                 </li>))}</ul>
             )}
-            {!anyProvider && providers.data && <div className="mt-3"><Unavailable title="Enrichment unavailable">No provider is configured, so indicators can be validated, stored and linked but not enriched. Keys stay on the backend and are never sent to the browser.</Unavailable></div>}
+            {providers.data && !reputation && <div className="mt-3"><Unavailable title="Reputation verdicts unavailable">Free sources give context (location, owner, exposure, known files, DNS posture) but no malicious/benign verdict. For severity ratings add a VirusTotal or AbuseIPDB key — keys stay on the backend and are never sent to the browser.</Unavailable></div>}
           </Panel>
         </div>
 
