@@ -179,6 +179,32 @@ class GeolocateAndSampleTests(GhostTestCase):
         self.assertEqual(e.exception.code, "already_loaded")
 
 
+class ConcurrencyTests(GhostTestCase):
+    def test_concurrent_read_then_write_transactions_never_fail_with_database_is_locked(self):
+        """Regression: transactions that read first and then wrote (deferred BEGIN) raised 'database is locked'
+        instead of waiting when several operations ran at once."""
+        import threading
+        errors: list[str] = []
+
+        def worker(n: int):
+            try:
+                for i in range(60):
+                    with db() as c:
+                        c.execute("SELECT COUNT(*) FROM audit").fetchone()          # read first ...
+                        c.execute("INSERT INTO audit(ts, actor, action, detail) VALUES ('t', ?, 'stress', '{}')", (f"w{n}-{i}",))  # ... then write
+            except Exception as exc:  # collected and asserted below
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        with db() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM audit WHERE action='stress'").fetchone()[0], 480)
+
+
 class FindingTests(GhostTestCase):
     def test_review_workflow(self):
         c = cases.create_case("Review case")

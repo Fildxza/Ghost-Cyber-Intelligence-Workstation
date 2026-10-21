@@ -13,7 +13,7 @@ from .. import __version__
 from ..config import get_settings
 from ..db import db, migrate, rows_to_dicts
 from ..errors import GhostError, NotFound
-from ..services import (ai, cases, command, evidence, findings, intel, operations, osint, pcap, reports, sample, system)
+from ..services import (ai, cases, command, evidence, findings, integrations, intel, operations, osint, pcap, reports, sample, system)
 
 log = logging.getLogger("ghost.api")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -188,6 +188,24 @@ def config():
 @app.put("/api/settings/field-mode")
 def put_field_mode():
     return {"field_mode": system.set_field_mode(flag(body(), "enabled"))}
+
+
+@app.get("/api/settings/integrations")
+def get_integrations():
+    return jsonify(integrations.status())
+
+
+@app.put("/api/settings/integrations")
+def put_integrations():
+    values = body().get("values")
+    if not isinstance(values, dict):
+        raise GhostError("'values' must be an object of setting -> value", 422, "validation")
+    return jsonify(integrations.save(values))
+
+
+@app.post("/api/settings/integrations/test")
+def test_integration():
+    return integrations.test(text(body(), "target", required=True, max_len=20))
 
 
 @app.post("/api/system/backup")

@@ -1,15 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Database, Download, Lock, WifiOff } from "lucide-react";
 import { put, post } from "../api";
 import { useApp } from "../state";
 import { fmtBytes, useOnline, utc } from "../lib";
 import { Badge, Button, Check, Kv, Loading, PageHeader, Panel, Unavailable } from "../ui";
+import Integrations from "../components/Integrations";
 
 export default function Settings() {
   const { status, notify, fail, workspaces, workspace } = useApp();
   const online = useOnline();
   const s = status.data;
   const [busy, setBusy] = useState(false);
+  const hash = useLocation().hash;
+  useEffect(() => { if (hash) document.querySelector(hash)?.scrollIntoView({ block: "start" }); }, [hash, status.data]);
   const [backup, setBackup] = useState<{ file: string; size: number; download: string } | null>(null);
 
   if (!s) return <Loading />;
@@ -25,6 +29,7 @@ export default function Settings() {
     <div className="mx-auto max-w-[1300px]">
       <PageHeader code="SYSTEM SETTINGS" title="Settings, Field Mode & data protection" sub="Local-first: everything is stored on this machine. There is no cloud sync and no sync queue — none is implemented." />
       <div className="grid gap-3 lg:grid-cols-2">
+        <Integrations />
         <Panel title="Field Mode" icon={<WifiOff size={13} />} right={<Badge tone={s.field_mode ? "amber" : "mute"}>{s.field_mode ? "active" : "off"}</Badge>}>
           <div className="space-y-3">
             <Check checked={s.field_mode} onChange={toggleField}><b>Work offline / minimise network exposure.</b> While on, the backend refuses every operation that would make an outbound request (OSINT lookups, enrichment). Cases, notes, evidence, PCAP analysis, graph and reports keep working from local storage.</Check>

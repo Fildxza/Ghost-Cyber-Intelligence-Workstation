@@ -11,7 +11,7 @@ if command -v cygpath >/dev/null 2>&1; then  # Git-Bash: hand native Windows pat
 else
   ROOT_NATIVE="$ROOT"
 fi
-export GHOST_DATA_DIR="$TMP/data" PYTHONPATH="$ROOT_NATIVE/backend" PYTHONUTF8=1
+export GHOST_DATA_DIR="$TMP/data" GHOST_ENV_FILE="$TMP/e2e.env" PYTHONPATH="$ROOT_NATIVE/backend" PYTHONUTF8=1  # isolated: never touches your real .env
 mkdir -p "$GHOST_DATA_DIR"
 (cd "$ROOT/backend/tests" && "$PY" -c "import sys; from helpers import classic_pcap; sys.stdout.buffer.write(classic_pcap())" > "$TMP/capture.pcap")
 "$PY" -m ghost serve --port "$PORT" > "$TMP/server.log" 2>&1 &

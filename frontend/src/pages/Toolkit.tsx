@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Bot, Check, Copy, Terminal, Wrench } from "lucide-react";
 import { AiResult, Case, get, post } from "../api";
 import { useApp } from "../state";
@@ -51,11 +52,9 @@ function Ai() {
   if (!ai) return <Loading />;
   if (!ai.configured) return (
     <div className="space-y-3">
-      <Unavailable title="AI analyst not configured">{ai.setup}</Unavailable>
-      <pre className="mono border border-line bg-bg2 p-3 text-[11.5px] text-mute">{`# .env
-GHOST_AI_BASE_URL=http://localhost:11434/v1   # e.g. Ollama (local model)
-GHOST_AI_MODEL=llama3.1
-# GHOST_AI_API_KEY=...   # only for hosted providers`}</pre>
+      <Unavailable title="AI analyst not configured" action={<Link to="/settings#integrations" className="mono inline-flex h-8 items-center border border-lime bg-lime px-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-bg hover:bg-[#c8ff7d]">Set it up in Settings</Link>}>
+        It needs a model you control (for example a free local Ollama model). Setup is a paste-and-click form — no file editing.
+      </Unavailable>
       <p className="text-[12px] text-dim">Everything else in Fidx-Ghost works without it. When configured, the model only sees a bounded snapshot of the selected case and its output is always labelled as unverified.</p>
     </div>
   );

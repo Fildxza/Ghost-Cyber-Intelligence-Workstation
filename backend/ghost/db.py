@@ -185,6 +185,7 @@ def _connect() -> sqlite3.Connection:
     settings.ensure_dirs()
     conn = sqlite3.connect(settings.db_path, timeout=15, isolation_level=None)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 15000")  # wait for other writers instead of failing immediately
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
@@ -192,10 +193,15 @@ def _connect() -> sqlite3.Connection:
 
 @contextmanager
 def db() -> Iterator[sqlite3.Connection]:
-    """Transactional connection: commits on success, rolls back on any exception (re-raised)."""
+    """Transactional connection: commits on success, rolls back on any exception (re-raised).
+
+    Uses BEGIN IMMEDIATE: a transaction that starts as a reader and later tries to write would otherwise
+    fail with "database is locked" the moment another operation holds the write lock (SQLite cannot wait
+    for a read→write upgrade). Taking the write lock up front lets concurrent operations queue safely.
+    Do not nest db() blocks in one thread."""
     conn = _connect()
     try:
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.execute("COMMIT")
     except BaseException:

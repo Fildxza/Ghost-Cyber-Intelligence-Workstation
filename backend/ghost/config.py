@@ -20,6 +20,14 @@ def _load_dotenv() -> None:
         break
 
 
+def default_env_file() -> Path:
+    """The .env the loader reads (current directory first, else the project root). Also where the UI saves integrations."""
+    if os.environ.get("GHOST_ENV_FILE"):
+        return Path(os.environ["GHOST_ENV_FILE"])
+    cwd = Path.cwd() / ".env"
+    return cwd if cwd.is_file() else Path(__file__).resolve().parents[2] / ".env"
+
+
 _load_dotenv()
 
 
@@ -69,6 +77,8 @@ class Settings:
     # Optional tools
     tshark_path: str | None = field(default_factory=lambda: os.environ.get("GHOST_TSHARK_PATH") or None)
     zeek_path: str | None = field(default_factory=lambda: os.environ.get("GHOST_ZEEK_PATH") or None)
+
+    env_file: Path = field(default_factory=default_env_file)
 
     @property
     def db_path(self) -> Path:

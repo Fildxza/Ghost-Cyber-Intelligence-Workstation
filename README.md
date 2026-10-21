@@ -26,6 +26,8 @@ anonymity or evasion tool.
 
 <img src="docs/screenshots/23-geo-pins.png" alt="Real geolocated pins from a live investigation">
 
+<img src="docs/screenshots/24-integrations.png" alt="Settings → Integrations: paste a key, press Test">
+
 <sub>Screenshots are real captures of the running app (data created through the app itself; DNS/RDAP results are live).</sub>
 
 > **Honesty rule:** every status light, metric and map pin is derived from real state. Nothing is
@@ -49,8 +51,8 @@ Yes — nothing here is a mock-up. There is no demo data and no fake telemetry. 
 | PCAP analysis | ✅ | Built-in parser; **TShark used automatically if installed** (verified with TShark 4.2.2 on Ubuntu/WSL) |
 | Entity graph, animated topology, vector map | ✅ | Offline-capable, no third-party requests |
 | Field Mode | ✅ | Backend refuses all outbound operations |
-| **Malicious / benign reputation verdicts** | ⚙️ needs a key | VirusTotal and/or AbuseIPDB (free keys). Without them severity stays *unknown*, never “safe” |
-| AI analyst | ⚙️ needs a model | Local Ollama or any OpenAI-compatible endpoint |
+| **Malicious / benign reputation verdicts** | ⚙️ needs a key | VirusTotal and/or AbuseIPDB (free keys) — **paste them in Settings → Integrations** (no file editing; press *Test* to check). Without them severity stays *unknown*, never “safe” |
+| AI analyst | ⚙️ needs a model | Local Ollama or any OpenAI-compatible endpoint — **Settings → Integrations → “Use local Ollama”** |
 | Zeek | ➖ detected only | Not used for analysis yet |
 
 Try it immediately: on the empty Command Centre press **Load sample investigation** (or `ghost sample`). It runs *real* passive lookups against `example.com` — a domain IANA reserves for documentation — and the resulting entities, findings and geolocated pins are genuine.
@@ -118,8 +120,8 @@ backend/ghost/
   dnsclient.py, dnswire.py   minimal DNS stub client + wire parser (bounds-checked)
   db.py              SQLite, versioned migrations (PRAGMA user_version), portable SQL
   cli.py             `ghost` (click) — calls the same services as the API
-backend/tests/       84 unittest cases        frontend/src/*.test.*   19 vitest cases
-e2e/                25-step real-browser journey (headless Chromium over DevTools protocol)
+backend/tests/       97 unittest cases        frontend/src/*.test.*   23 vitest cases
+e2e/                26-step real-browser journey (headless Chromium over DevTools protocol)
 ```
 
 * One short-lived SQLite connection per unit of work (WAL). Schema SQL avoids SQLite-only features
@@ -145,6 +147,7 @@ e2e/                25-step real-browser journey (headless Chromium over DevTool
 | **Evidence vault** | Register with SHA-256, optional AES-256-GCM encryption at rest, **verification recomputes the hash from stored bytes**, custody activity log, export, delete (audit record keeps name + hash), ZIP backup with SHA-256 manifest. UI states clearly that this is an integrity hash, not a signature or chain-of-custody proof. |
 | **Reports** | Self-contained HTML: scope, methodology, findings, indicators, evidence, notes, limitations, rule-derived recommendations, audit appendix. Everything HTML-escaped; served with a restrictive CSP. PDF via the browser's *Print → Save as PDF*. |
 | **Field Mode** | Persisted toggle; while on, the backend **refuses every outbound operation** (lookups, enrichment). Local work continues. Online/offline indicator from `navigator.onLine`. |
+| **Integrations** | Settings → Integrations: paste VirusTotal / AbuseIPDB / ipinfo keys or an AI endpoint, press **Test** (one harmless request; shows a real accepted/rejected result), **Remove** to delete. Saved to the local `.env` atomically, applied immediately (no restart), whitelisted + validated, **write-only** (never shown or logged; only “saved ••••1234”). |
 | **AI analyst** | Optional, any OpenAI-compatible endpoint (e.g. local Ollama) configured **only via env**. Sees a bounded snapshot of one case; output is always labelled *MODEL-GENERATED — NOT VERIFIED*, never written into findings. Setup screen when unconfigured. |
 | **CLI** | See §5. |
 
@@ -194,8 +197,8 @@ ghost report generate N [--output report.html]
 ## 6. Testing
 
 ```powershell
-cd backend;  $env:PYTHONPATH="."; python -m unittest discover -s tests     # 84 tests
-cd frontend; npx tsc --noEmit; npx vitest run; npm run build               # types, 19 tests, build
+cd backend;  $env:PYTHONPATH="."; python -m unittest discover -s tests     # 97 tests
+cd frontend; npx tsc --noEmit; npx vitest run; npm run build               # types, 23 tests, build
 ```
 
 Real-browser end-to-end journey (needs a Chromium-based browser, a built UI, and internet for the

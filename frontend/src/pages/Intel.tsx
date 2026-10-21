@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Download, Link2, Plus, ShieldAlert, Zap } from "lucide-react";
 import { Case, Indicator, Provider, get, post, qs } from "../api";
 import { useApp } from "../state";
@@ -115,7 +115,7 @@ export default function Intel() {
                     <Badge tone={p.configured ? "lime" : "amber"}>{p.configured ? (p.needs_key ? "key configured" : "ready · no key") : "key needed"}</Badge></div>
                   <div className="mono mt-0.5 text-[10px] text-dim">{p.types.join(" · ")}{p.reputation ? " · reputation verdict" : " · context only"}</div>
                   <div className="mono text-[10px] text-dim">SENDS TO {p.sends_to}</div>
-                  {!p.configured && <p className="mt-1 text-[11.5px] text-mute">{p.setup}</p>}
+                  {!p.configured && <p className="mt-1 text-[11.5px] text-mute">{p.setup}{p.needs_key && <> · <Link to="/settings#integrations" className="text-lime hover:underline">add it in Settings</Link></>}</p>}
                 </li>))}</ul>
             )}
             {providers.data && !reputation && <div className="mt-3"><Unavailable title="Reputation verdicts unavailable">Free sources give context (location, owner, exposure, known files, DNS posture) but no malicious/benign verdict. For severity ratings add a VirusTotal or AbuseIPDB key — keys stay on the backend and are never sent to the browser.</Unavailable></div>}

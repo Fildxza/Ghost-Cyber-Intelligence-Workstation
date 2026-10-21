@@ -262,6 +262,23 @@ await step("Settings: backup creates a downloadable ZIP", async () => {
   await shot("18-settings");
 });
 
+await step("Settings → Integrations: paste key, Test shows a REAL rejection, secret never shown back, remove", async () => {
+  const KEY = "bogus_key_for_e2e_123456";
+  await goto("/settings"); await hasText("virustotal api key");
+  await fill("virustotal api key", KEY);
+  await ev(`document.getElementById('int-VIRUSTOTAL_API_KEY').closest('form').querySelector('button[type=submit]').click()`);
+  await hasText("saved ••••3456");
+  if ((await text()).includes(KEY.toLowerCase())) throw new Error("secret echoed back into the page");
+  const st = await api("/status"); if (!st.j.providers.find((p) => p.id === "virustotal").configured) throw new Error("not applied live");
+  const body = JSON.stringify((await api("/settings/integrations")).j); if (body.includes(KEY)) throw new Error("API returned the secret");
+  await ev(`[...document.getElementById('int-VIRUSTOTAL_API_KEY').closest('form').querySelectorAll('button')].find(b=>/^test$/i.test(b.innerText.trim())).click()`);
+  await waitFor(`document.body.innerText.toLowerCase().includes('rejected this key')`, 30000);
+  await shot("24-integrations");
+  await ev(`document.querySelector('[aria-label="Remove VirusTotal API key"]').click()`);
+  await waitFor(`!document.body.innerText.includes('saved ••••3456')`, 10000);
+  const after = await api("/status"); if (after.j.providers.find((p) => p.id === "virustotal").configured) throw new Error("key not removed");
+});
+
 await step("Global search finds case/indicator/evidence and navigates", async () => {
   await goto("/");
   await ev(`document.querySelector('[aria-label="Global search"]').focus()`);

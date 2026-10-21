@@ -38,6 +38,32 @@ def status() -> dict[str, Any]:
     return system.ai_status()
 
 
+def ping() -> dict[str, Any]:
+    """One tiny completion to confirm the configured endpoint + model work (used by Settings → Test)."""
+    s = get_settings()
+    if not (s.ai_base_url and s.ai_model):
+        raise Unavailable("Set the AI endpoint URL and model name first.", "ai_not_configured")
+    headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {s.ai_api_key}"} if s.ai_api_key else {})}
+    body = {"model": s.ai_model, "max_tokens": 8, "temperature": 0, "messages": [{"role": "user", "content": "Reply with the single word OK."}]}
+    try:
+        r = httpx.post(s.ai_base_url.rstrip("/") + "/chat/completions", headers=headers, json=body, timeout=60)
+    except httpx.TimeoutException:
+        return {"ok": False, "status": "timeout", "message": "The AI endpoint did not answer within 60 s (is the model still loading?)."}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "status": "unreachable", "message": f"Could not reach {s.ai_base_url} ({type(exc).__name__}). Is the model server running?"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "status": "auth_error", "message": "The endpoint rejected the API key.", "http_status": r.status_code}
+    if r.status_code == 404:
+        return {"ok": False, "status": "not_found", "message": "Endpoint or model not found. Check the URL ends with /v1 and the model name exists.", "http_status": 404}
+    if r.status_code != 200:
+        return {"ok": False, "status": "error", "message": f"Endpoint returned HTTP {r.status_code}.", "http_status": r.status_code}
+    try:
+        reply = r.json()["choices"][0]["message"]["content"].strip()[:80]
+    except (KeyError, IndexError, ValueError):
+        return {"ok": False, "status": "bad_response", "message": "The endpoint answered, but not in OpenAI chat format."}
+    return {"ok": True, "status": "ok", "message": f"Model replied: \u201c{reply}\u201d", "http_status": 200}
+
+
 def _snapshot(case_id: int) -> tuple[dict[str, Any], list[str]]:
     case = cases.get_case(case_id)
     fnds = findings.list_findings(case_id=case_id, limit=60)

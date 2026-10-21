@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FilePlus2, FileText, Globe, Share2, Network, ShieldAlert, Activity, FolderOpen, Cpu, Database, Wrench, Briefcase, ScrollText, Layers } from "lucide-react";
+import { Bot, FilePlus2, FileText, Globe, Lock, Share2, Network, ShieldAlert, Activity, FolderOpen, Cpu, Database, Wrench, Briefcase, ScrollText, Layers } from "lucide-react";
 import { Overview, get, post, qs } from "../api";
 import { useApp } from "../state";
 import { ago, fmtNum, useLoad, utc, utcTime } from "../lib";
@@ -23,6 +23,26 @@ function Health() {
       <span className="mono flex items-center gap-1.5 text-[11px]"><Dot tone={tone} />{value}</span>
     </li>
   );
+  const setup = (to: string, text: string) => <Link to={to} className="text-lime hover:underline">{text}</Link>;
+  const capabilities = (st: NonNullable<typeof s>) => {
+    const reputation = st.providers.some((p) => p.configured && p.reputation);
+    const geo = st.providers.some((p) => p.configured && p.id === "ipwho" || p.configured && p.id === "ipinfo");
+    return (<>
+      <li className="flex items-start gap-3 border-b border-line py-2"><span className="mt-0.5 text-dim"><Globe size={14} /></span>
+        <div className="min-w-0 flex-1"><div className="label">GEOLOCATION & EXPOSURE</div><div className="mono mt-0.5 text-[10.5px] text-dim">ipwho.is + Shodan InternetDB · no key needed</div></div>
+        <span className="mono flex items-center gap-1.5 text-[11px]"><Dot tone={geo ? "lime" : "amber"} />{geo ? "READY" : "OFF"}</span></li>
+      <li className="flex items-start gap-3 border-b border-line py-2"><span className="mt-0.5 text-dim"><ShieldAlert size={14} /></span>
+        <div className="min-w-0 flex-1"><div className="label">REPUTATION VERDICTS</div><div className="mono mt-0.5 text-[10.5px] text-dim">{reputation ? "VirusTotal / AbuseIPDB" : <>needs a free key · {setup("/settings#integrations", "set up")}</>}</div></div>
+        <span className="mono flex items-center gap-1.5 text-[11px]"><Dot tone={reputation ? "lime" : "amber"} />{reputation ? "ACTIVE" : "KEY NEEDED"}</span></li>
+      <li className="flex items-start gap-3 border-b border-line py-2"><span className="mt-0.5 text-dim"><Bot size={14} /></span>
+        <div className="min-w-0 flex-1"><div className="label">AI ANALYST</div><div className="mono mt-0.5 text-[10.5px] text-dim">{st.ai.configured ? st.ai.model : <>optional · {setup("/settings#integrations", "set up")}</>}</div></div>
+        <span className="mono flex items-center gap-1.5 text-[11px]"><Dot tone={st.ai.configured ? "lime" : "mute"} />{st.ai.configured ? "READY" : "NOT SET UP"}</span></li>
+      <li className="flex items-start gap-3 border-b border-line py-2"><span className="mt-0.5 text-dim"><Lock size={14} /></span>
+        <div className="min-w-0 flex-1"><div className="label">EVIDENCE ENCRYPTION</div><div className="mono mt-0.5 text-[10.5px] text-dim">{st.vault.encryption === "enabled" ? "AES-256-GCM at rest" : "optional · set GHOST_VAULT_PASSPHRASE"}</div></div>
+        <span className="mono flex items-center gap-1.5 text-[11px]"><Dot tone={st.vault.encryption === "enabled" ? "lime" : "mute"} />{st.vault.encryption === "enabled" ? "ON" : "OFF"}</span></li>
+    </>);
+  };
+
   if (!s && status.error) return <ErrorNote message={`Status unavailable: ${status.error}`} onRetry={status.reload} />;
   if (!s) return <Loading label="PROBING" />;
   return (
@@ -30,6 +50,7 @@ function Health() {
       {row(<Cpu size={14} />, "API", apiUp ? "lime" : "crit", apiUp ? "REACHABLE" : "DOWN", `v${s.version} · started ${ago(s.started_at)}`)}
       {row(<Database size={14} />, "DATABASE", s.database.ok ? "lime" : "crit", s.database.ok ? "OK" : "FAULT", s.database.ok ? `sqlite · schema v${s.database.schema_version} · ${s.database.latency_ms} ms` : s.database.error)}
       {row(<Layers size={14} />, "WORKER", s.worker.running > 0 ? "amber" : "lime", `${s.worker.running} RUN · ${s.worker.queued} QUEUE`, `${s.worker.kind} · ${s.worker.workers} threads · ${s.worker.completed} done · ${s.worker.failed} failed`)}
+      {capabilities(s)}
       {s.tools.map((t) => row(<Wrench size={14} />, t.name.toUpperCase(), t.installed ? "lime" : "amber", t.installed ? "AVAILABLE" : "NOT INSTALLED", t.installed ? (t.version ?? t.path ?? undefined) : "see Toolkit for install steps"))}
     </ul>
   );

@@ -139,6 +139,72 @@ describe("Sample investigation", () => {
   });
 });
 
+describe("Integrations (Settings)", () => {
+  const rows = (vt: boolean) => [
+    { env: "VIRUSTOTAL_API_KEY", label: "VirusTotal API key", kind: "secret", help: "Free key", configured: vt, ...(vt ? { hint: "••••7890" } : {}) },
+    { env: "ABUSEIPDB_API_KEY", label: "AbuseIPDB API key", kind: "secret", help: "Free key", configured: false },
+    { env: "IPINFO_TOKEN", label: "ipinfo.io token", kind: "secret", help: "Optional", configured: false },
+    { env: "GHOST_AI_BASE_URL", label: "AI endpoint URL", kind: "url", help: "OpenAI-compatible", configured: false },
+    { env: "GHOST_AI_MODEL", label: "AI model name", kind: "text", help: "e.g. llama3.1", configured: false },
+    { env: "GHOST_AI_API_KEY", label: "AI API key", kind: "secret", help: "hosted only", configured: false },
+  ];
+
+  it("saves only what was typed, clears the field, and never shows the secret back", async () => {
+    let sent: Record<string, unknown> | null = null;
+    let saved = false;
+    mockApi({
+      ...base,
+      "/api/settings/integrations": (init) => {
+        if (init?.method === "PUT") { sent = JSON.parse(String(init.body)); saved = true; return json(rows(true)); }
+        return json(rows(saved));
+      },
+    });
+    renderApp("/settings");
+    const input = (await screen.findByLabelText("VirusTotal API key")) as HTMLInputElement;
+    expect(input.type).toBe("password");
+    expect(screen.getAllByText("not set").length).toBeGreaterThan(0);
+    fireEvent.change(input, { target: { value: "vt_ABCDEFGH1234567890" } });
+    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(saved).toBe(true));
+    expect(sent).toEqual({ values: { VIRUSTOTAL_API_KEY: "vt_ABCDEFGH1234567890" } });
+    expect(await screen.findByText("saved ••••7890")).toBeInTheDocument();
+    expect((screen.getByLabelText("VirusTotal API key") as HTMLInputElement).value).toBe("");
+    expect(document.body.textContent).not.toContain("vt_ABCDEFGH1234567890");
+  });
+
+  it("shows the real test outcome: accepted vs rejected", async () => {
+    let verdict = { ok: true, status: "ok", message: "Key accepted — the provider answered normally." };
+    mockApi({ ...base, "/api/settings/integrations/test": () => json(verdict), "/api/settings/integrations": () => json(rows(true)) });
+    renderApp("/settings");
+    const form = (await screen.findByLabelText("VirusTotal API key")).closest("form")!;
+    fireEvent.click(within(form).getByRole("button", { name: /^test$/i }));
+    expect(await within(form).findByText(/Key accepted/)).toBeInTheDocument();
+    verdict = { ok: false, status: "auth_error", message: "The provider REJECTED this key (HTTP 401/403). Check you copied the whole key." };
+    fireEvent.click(within(form).getByRole("button", { name: /^test$/i }));
+    expect(await within(form).findByText(/REJECTED this key/)).toBeInTheDocument();
+  });
+
+  it("surfaces a validation error from the backend instead of pretending it saved", async () => {
+    mockApi({
+      ...base,
+      "/api/settings/integrations": (init) => init?.method === "PUT" ? json({ error: { code: "validation", message: "VirusTotal API key: expected 8-300 characters" } }, { status: 422 }) : json(rows(false)),
+    });
+    renderApp("/settings");
+    const input = await screen.findByLabelText("VirusTotal API key");
+    fireEvent.change(input, { target: { value: "short" } });
+    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: /save/i }));
+    expect(await screen.findByText(/expected 8-300 characters/)).toBeInTheDocument();
+  });
+
+  it("'Use local Ollama' pre-fills the endpoint and model", async () => {
+    mockApi({ ...base, "/api/settings/integrations": () => json(rows(false)) });
+    renderApp("/settings");
+    fireEvent.click(await screen.findByRole("button", { name: /use local ollama/i }));
+    expect((screen.getByLabelText("AI endpoint URL") as HTMLInputElement).value).toBe("http://localhost:11434/v1");
+    expect((screen.getByLabelText("AI model name") as HTMLInputElement).value).toBe("llama3.1");
+  });
+});
+
 describe("Navigation shell", () => {
   it("contains all eleven required sections", async () => {
     mockApi(base);
