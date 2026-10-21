@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Fidx-Ghost CLI launcher (Linux / WSL2). Usage: ./ghost status | ./ghost case list | ...
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHONPATH="$DIR/backend${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m ghost "$@"

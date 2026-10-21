@@ -1,0 +1,17 @@
+# local data (cases, evidence, uploads, reports, backups) — never commit
+data/
+.env
+*.db
+*.db-wal
+*.db-shm
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+# node
+node_modules/
+frontend/dist/
+
+# e2e screenshots
+e2e/out/
