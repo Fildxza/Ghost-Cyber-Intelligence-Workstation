@@ -40,6 +40,24 @@ class ApiTests(GhostTestCase):
         self.assertFalse(s["ai"]["configured"])
         self.assertEqual(s["vault"]["encryption"], "disabled")
 
+    def test_map_is_bundled_by_default_and_referrer_is_sent_cross_origin(self):
+        cfg = self.c.get("/api/config").get_json()
+        self.assertEqual(cfg["map"]["tile_url"], "", "default basemap must be bundled vector (no third-party tiles)")
+        self.assertEqual(self.c.get("/api/health").headers["Referrer-Policy"], "strict-origin-when-cross-origin")
+        self.setenv(GHOST_MAP_TILE_URL="https://tiles.example/{z}/{x}/{y}.png")
+        self.assertEqual(self.c.get("/api/config").get_json()["map"]["tile_url"], "https://tiles.example/{z}/{x}/{y}.png")
+
+    def test_graph_limit_parameter(self):
+        for i in range(5):
+            self.c.post("/api/cases", json={"name": f"Graph limit {i}"})
+        from ghost.db import db
+        from ghost.services import findings
+        with db() as conn:
+            for i in range(8):
+                findings.upsert_entity(conn, "domain", f"d{i}.example")
+        self.assertEqual(len(self.c.get("/api/graph?limit=3").get_json()["nodes"]), 3)
+        self.assertEqual(len(self.c.get("/api/graph").get_json()["nodes"]), 8)
+
     def test_secrets_never_serialised(self):
         self.setenv(VIRUSTOTAL_API_KEY="SUPERSECRETKEY123")
         for path in ("/api/status", "/api/config", "/api/intel/providers"):

@@ -55,7 +55,7 @@ def guard():
 @app.after_request
 def headers(resp: Response):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     origin = request.headers.get("Origin")
     if origin and origin in get_settings().cors_origins:
         resp.headers["Access-Control-Allow-Origin"] = origin
@@ -441,7 +441,7 @@ def network_analyze():
 
 @app.get("/api/graph")
 def get_graph():
-    return findings.graph(qint("case_id"), [t for t in request.args.get("types", "").split(",") if t] or None)
+    return findings.graph(qint("case_id"), [t for t in request.args.get("types", "").split(",") if t] or None, min(qint("limit") or 600, 1000))
 
 
 @app.get("/api/evidence")

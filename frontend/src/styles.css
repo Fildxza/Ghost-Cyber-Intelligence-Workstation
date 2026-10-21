@@ -124,6 +124,13 @@ body {
   filter: invert(1) hue-rotate(180deg) brightness(0.78) contrast(0.95) saturate(0.3) sepia(0.25) hue-rotate(60deg);
 }
 
+/* pulsing pin for REAL geolocated indicators */
+.geo-pin { background: none; border: 0; }
+.geo-dot { position: absolute; inset: 5px; background: var(--c); border-radius: 50%; box-shadow: 0 0 8px var(--c); }
+.geo-ring { position: absolute; inset: 0; border: 1.5px solid var(--c); border-radius: 50%; animation: geo-ping 2.2s ease-out infinite; }
+@keyframes geo-ping { 0% { transform: scale(0.5); opacity: 0.9; } 100% { transform: scale(2.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .geo-ring { animation: none; opacity: 0.5; } }
+
 @keyframes pulse-dot {
   0%,
   100% {

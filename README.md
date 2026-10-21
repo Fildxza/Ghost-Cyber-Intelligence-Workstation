@@ -9,6 +9,8 @@ It is an **independent, lawful OSINT / defensive-security tool**. It is not affi
 does not imitate, any government or military body. It is a privacy-*conscious* workstation, not an
 anonymity or evasion tool.
 
+![Animated network topology on the Command Centre](docs/screenshots/22-topology-motion.png)
+
 ![Command Centre](docs/screenshots/20-command.png)
 
 <table>
@@ -76,7 +78,7 @@ Optional editable install (puts a real `ghost` command on PATH):
 ## 2. Architecture
 
 ```
-frontend/  React 19 + TypeScript + Vite + Tailwind 4  — Leaflet map, Cytoscape graph, Inter + IBM Plex Mono (bundled)
+frontend/  React 19 + TypeScript + Vite + Tailwind 4  — Leaflet (bundled vector map), Cytoscape graph + motion overlay, Inter + IBM Plex Mono (bundled)
 backend/ghost/
   api/main.py        Flask routes — thin; validation + JSON only
   services/          all business logic (cases, operations, osint, intel, pcap, evidence,
@@ -85,8 +87,8 @@ backend/ghost/
   dnsclient.py, dnswire.py   minimal DNS stub client + wire parser (bounds-checked)
   db.py              SQLite, versioned migrations (PRAGMA user_version), portable SQL
   cli.py             `ghost` (click) — calls the same services as the API
-backend/tests/       71 unittest cases        frontend/src/*.test.*   16 vitest cases
-e2e/                23-step real-browser journey (headless Chromium over DevTools protocol)
+backend/tests/       73 unittest cases        frontend/src/*.test.*   18 vitest cases
+e2e/                24-step real-browser journey (headless Chromium over DevTools protocol)
 ```
 
 * One short-lived SQLite connection per unit of work (WAL). Schema SQL avoids SQLite-only features
@@ -103,7 +105,7 @@ e2e/                23-step real-browser journey (headless Chromium over DevTool
 | Area | Implemented |
 |---|---|
 | **Shell** | 11-section nav rail (compact mode), command bar with workspace selector, working global search (cases / indicators / evidence, `/` to focus), local + UTC clocks, status chips (API, tools, vault, link/field mode), analyst menu, bottom status strip (version, API, DB + latency, queue, workspace, last successful operation). Status is polled every 8 s; **API never shows green unless the last poll succeeded**. |
-| **Command Centre** | Generated operation/session ID; 4 metrics; Leaflet map (real tiles, pins only for provider-geolocated indicators); 14-day activity timeline from the audit trail; event stream (polled, real timestamps); system health; recent investigations/operations; 5 quick actions, each opens a real form or page. |
+| **Command Centre** | Generated operation/session ID; 4 metrics; **Geo map** (Leaflet on a bundled Natural Earth vector basemap — no tiles, no third-party requests, works offline; pulsing pins only for provider-geolocated indicators) and an **animated Topology view** (real entities/relationships: markers travel along each link in its recorded direction, amber rings ping entities recorded in the last 15 min — structure and recency, *not* live traffic); 14-day activity timeline from the audit trail; event stream (polled, real timestamps); system health; recent investigations/operations; 5 quick actions, each opens a real form or page. |
 | **Cases** | Create / view / edit / archive / search; backend-issued IDs (`GHO-CASE-2026-0001`); objective, scope, **authorisation declaration**, priority, tags, notes, per-case timeline, findings with review workflow (confirm / dismiss), linked indicators/evidence/operations/reports. Workspaces scope cases. |
 | **OSINT** | DNS (A/AAAA/NS/MX/TXT/CNAME/SOA/CAA via own resolver client), RDAP registration, certificate transparency (crt.sh). **Active** TLS-certificate inspection and HTTPS metadata only for a case with declared scope + authorisation + a stated authoriser. Every finding stores source, URL, retrieval time, confidence, freshness (`live` → `stale` after 24 h). Failed steps are reported, never filled in. |
 | **Threat intel** | Normalisation (accepts defanged `hxxp`, `[.]`), type detection, duplicate detection, VirusTotal / AbuseIPDB / ipinfo providers (keys via env), per-provider status, explainable severity + confidence with reasoning, case linking, CSV/JSON export. Private IPs are never sent to third parties. |
@@ -161,8 +163,8 @@ ghost report generate N [--output report.html]
 ## 6. Testing
 
 ```powershell
-cd backend;  $env:PYTHONPATH="."; python -m unittest discover -s tests     # 71 tests
-cd frontend; npx tsc --noEmit; npx vitest run; npm run build               # types, 16 tests, build
+cd backend;  $env:PYTHONPATH="."; python -m unittest discover -s tests     # 73 tests
+cd frontend; npx tsc --noEmit; npx vitest run; npm run build               # types, 18 tests, build
 ```
 
 Real-browser end-to-end journey (needs a Chromium-based browser, a built UI, and internet for the
@@ -183,7 +185,8 @@ report escaping, API guards (Host, Origin), secrets never serialised, CLI exit c
 The browser journey additionally covers: case create/edit/notes, live DNS+RDAP investigation, SSRF refusal
 of a loopback-resolving host, IOC normalisation + duplicate detection, PCAP upload → results, evidence
 register/verify/**tamper detection**/export/delete, graph filters + search, report generation + CSP,
-Field Mode enforcement, backup download, global search navigation, workspaces.
+Field Mode enforcement, backup download, global search navigation, workspaces, the bundled vector map
+(no raster tiles), a topology overlay that is verifiably animating, and **zero third-party network requests**.
 
 ---
 
@@ -207,9 +210,9 @@ Field Mode enforcement, backup download, global search navigation, workspaces.
   are (when `GHOST_VAULT_PASSPHRASE` is set, and only for evidence registered after it is set).
 * Integrity hashes are not digital signatures or trusted timestamps; nothing claims admissibility.
 * Reports are HTML; PDF relies on the browser. Report recommendations are rule-derived, not AI.
-* The default basemap is OpenStreetMap standard tiles (darkened client-side) — respect OSM's tile
-  policy or set `GHOST_MAP_TILE_URL` to your own provider. Offline, the map shows an explicit
-  "basemap unavailable" notice.
+* The default basemap is a bundled 1:110m Natural Earth vector map (country level, no street detail).
+  For street-level detail set `GHOST_MAP_TILE_URL` to a raster provider you are licensed to use
+  (OpenStreetMap's public tile servers block clients that don't follow their usage policy).
 * Telemetry-style claims are deliberately absent: the event stream is *polled*, not pushed.
 * Flask's built-in server is used (single-user, loopback). Don't expose it to a network.
 * Responsive layout was checked at 500 px, 820 px and 1440 px (Edge headless cannot go below

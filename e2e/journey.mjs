@@ -32,6 +32,7 @@ ws.onmessage = (m) => {
   if (d.id && pending.has(d.id)) { const { res, rej } = pending.get(d.id); pending.delete(d.id); d.error ? rej(new Error(d.error.message)) : res(d.result); return; }
   if (d.method === "Runtime.exceptionThrown") consoleErrors.push("EXC " + (d.params.exceptionDetails.exception?.description ?? d.params.exceptionDetails.text).split("\n")[0]);
   if (d.method === "Runtime.consoleAPICalled" && ["error"].includes(d.params.type)) consoleErrors.push("console.error " + d.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 200));
+  if (d.method === "Network.requestWillBeSent") { const u = d.params.request.url; if (!u.startsWith(BASE) && !u.startsWith("data:") && !u.startsWith("blob:") && !u.startsWith("about:")) external.push(u.slice(0, 120)); }
   if (d.method === "Network.responseReceived" && d.params.response.url.includes("/api/") && d.params.response.status >= 400) apiFails.push(`${d.params.response.status} ${d.params.response.url.replace(BASE, "")}`);
 };
 const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, { res, rej }); ws.send(JSON.stringify({ id: i, method, params })); });
@@ -59,6 +60,7 @@ const shot = async (name) => { const r = await send("Page.captureScreenshot", { 
 const api = (path, opt) => ev(`fetch('/api${path}',${J(opt ?? {})}).then(async r=>({s:r.status,j:await r.json().catch(()=>null)}))`);
 
 const results = [];
+const external = [];
 const step = async (name, fn) => {
   const t0 = Date.now();
   try { await fn(); results.push({ name, ok: true }); console.log(`PASS  ${name} (${Date.now() - t0}ms)`); }
@@ -241,7 +243,7 @@ await step("Toolkit: tools, CLI reference, AI analyst setup screen", async () =>
 });
 
 await step("Field Mode blocks outbound operations; local work continues", async () => {
-  await goto("/settings"); await clickText("work offline", "label"); await hasText("field mode active".replace("field mode active", "mode"));
+  await goto("/settings"); await hasText("work offline"); await clickText("work offline", "label"); await hasText("field mode active".replace("field mode active", "mode"));
   await sleep(800);
   const r = await api("/osint/domain", { method: "POST", headers: { "Content-Type": "application/json" }, body: J({ domain: "example.com" }) });
   if (r.s !== 503 || r.j.error.code !== "field_mode") throw new Error("field mode not enforced " + J(r));
@@ -249,7 +251,7 @@ await step("Field Mode blocks outbound operations; local work continues", async 
   const local = await api("/cases", { method: "POST", headers: { "Content-Type": "application/json" }, body: J({ name: "Offline case works" }) });
   if (local.s !== 201) throw new Error("local work blocked");
   await shot("17-field-mode");
-  await goto("/settings"); await clickText("work offline", "label"); await sleep(800);
+  await goto("/settings"); await hasText("work offline"); await clickText("work offline", "label"); await sleep(800);
   const again = await api("/status"); if (again.j.field_mode) throw new Error("did not turn off");
 });
 
@@ -279,6 +281,25 @@ await step("Workspace: create + switch scopes the case list", async () => {
   await goto("/cases"); await hasText("phishing infrastructure review");
 });
 
+await step("Command Centre: bundled vector map + animated topology, zero third-party requests", async () => {
+  await goto("/"); await sleep(2500);
+  await hasText("basemap · bundled vector");
+  const tiles = await ev(`document.querySelectorAll('.leaflet-tile').length`);
+  if (tiles !== 0) throw new Error("raster tiles present: " + tiles);
+  const painted = await ev(`(()=>{const c=document.querySelector('.leaflet-overlay-pane canvas');if(!c)return -1;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let n=0;for(let i=3;i<d.length;i+=4*50)if(d[i]>0)n++;return n})()`);
+  if (painted < 200) throw new Error("vector map not painted (" + painted + ")");
+  await shot("21-map-vector");
+  await clickText("topology", "[role=tab]");
+  await hasText("not live traffic"); await waitFor(`(+(document.body.innerText.match(/(\\d+) NODES/i)||[0,0])[1])>0`, 15000);
+  await sleep(1500);
+  const sample = () => ev(`(()=>{const c=document.querySelector('canvas[aria-hidden]');if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let n=0,h=0;for(let i=3;i<d.length;i+=4*7){if(d[i]>0){n++;h=(h*31+i+d[i])|0}}return {n,h}})()`);
+  const a = await sample(); await sleep(700); const b = await sample();
+  if (!a || a.n < 5) throw new Error("no motion markers painted " + J(a));
+  if (a.h === b.h) throw new Error("topology overlay is static (no motion)");
+  await shot("22-topology-motion");
+  await clickText("geo map", "[role=tab]"); await sleep(500);
+});
+
 await step("Command Centre with real data (final look)", async () => {
   await goto("/"); await sleep(1500); await hasText("phishing infrastructure review");
   await shot("20-command-final");
@@ -296,6 +317,8 @@ console.log("\n=== SUMMARY ===");
 const failed = results.filter((r) => !r.ok);
 console.log(`${results.length - failed.length}/${results.length} steps passed`);
 const uniq = (a) => [...new Set(a)];
+console.log("third-party requests:", [...new Set(external)]);
+if (external.length) { console.log("FAIL  external requests were made"); failed.push({ name: "external requests" }); }
 console.log("console errors:", uniq(consoleErrors).slice(0, 12));
 console.log("api >=400 responses (some expected: 404/503/415):", uniq(apiFails).slice(0, 20));
 edge.kill(); process.exit(failed.length ? 1 : 0);

@@ -50,8 +50,8 @@ class Settings:
     vault_passphrase: str | None = field(default_factory=lambda: os.environ.get("GHOST_VAULT_PASSPHRASE") or None)
 
     # Map
-    map_tile_url: str = field(default_factory=lambda: os.environ.get("GHOST_MAP_TILE_URL", "https://tile.openstreetmap.org/{z}/{x}/{y}.png"))
-    map_attribution: str = field(default_factory=lambda: os.environ.get("GHOST_MAP_ATTRIBUTION", "&copy; OpenStreetMap contributors"))
+    map_tile_url: str = field(default_factory=lambda: os.environ.get("GHOST_MAP_TILE_URL", ""))
+    map_attribution: str = field(default_factory=lambda: os.environ.get("GHOST_MAP_ATTRIBUTION", "Natural Earth (public domain) · bundled vector basemap"))
 
     # Set to 1 if your tile provider already serves a dark style (otherwise tiles are darkened client-side)
     map_dark_tiles: bool = field(default_factory=lambda: os.environ.get("GHOST_MAP_DARK_TILES", "0") == "1")

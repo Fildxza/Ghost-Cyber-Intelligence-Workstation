@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FilePlus2, FileText, Globe, Network, ShieldAlert, Activity, FolderOpen, Cpu, Database, Wrench, Briefcase, ScrollText, Layers } from "lucide-react";
+import { FilePlus2, FileText, Globe, Share2, Network, ShieldAlert, Activity, FolderOpen, Cpu, Database, Wrench, Briefcase, ScrollText, Layers } from "lucide-react";
 import { Overview, get, qs } from "../api";
 import { useApp } from "../state";
 import { ago, fmtNum, useLoad, utc, utcTime } from "../lib";
 import { Badge, Button, Dot, Empty, ErrorNote, Loading, Metric, Panel, StatusBadge, cx, priorityTone } from "../ui";
 import MapPanel from "../components/MapPanel";
+import TopologyPanel from "../components/TopologyPanel";
 import Timeline from "../components/Timeline";
 import CaseFormModal from "../components/CaseForm";
 import ReportModal from "../components/ReportModal";
@@ -39,6 +40,7 @@ export default function Command() {
   const nav = useNavigate();
   const [newCase, setNewCase] = useState(false);
   const [report, setReport] = useState(false);
+  const [view, setView] = useState<"map" | "topology">("map");
   const ov = useLoad(() => get<Overview>(`/command/overview${qs({ workspace_id: workspace?.id })}`), [workspace?.id], 8000);
   const d = ov.data;
   const m = d?.metrics;
@@ -80,9 +82,15 @@ export default function Command() {
 
       {/* map + side column */}
       <div className="grid gap-3 xl:grid-cols-12">
-        <Panel title="Geospatial picture" icon={<Globe size={13} />} className="xl:col-span-8" flush bodyClassName="min-h-[360px]"
-          right={<Badge tone="mute">NO SIMULATED DATA</Badge>}>
-          <MapPanel points={d?.geo ?? []} />
+        <Panel title={view === "map" ? "Geospatial picture" : "Network topology"} icon={view === "map" ? <Globe size={13} /> : <Share2 size={13} />} className="xl:col-span-8" flush bodyClassName="min-h-[420px]"
+          right={<>
+            <div role="tablist" aria-label="Picture view" className="flex">
+              {(["map", "topology"] as const).map((v) => (
+                <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}
+                  className={cx("mono border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em]", view === v ? "border-lime/50 bg-lime/[0.08] text-lime" : "border-line text-mute hover:text-ink")}>{v === "map" ? "Geo map" : "Topology"}</button>))}
+            </div>
+            <Badge tone="mute">NO SIMULATED DATA</Badge></>}>
+          {view === "map" ? <MapPanel points={d?.geo ?? []} /> : <TopologyPanel />}
         </Panel>
         <div className="flex flex-col gap-3 xl:col-span-4">
           <Panel title="Quick actions" icon={<Briefcase size={13} />}>

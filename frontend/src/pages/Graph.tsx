@@ -1,22 +1,14 @@
 import { useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Maximize2, Minus, Plus, RotateCcw, Share2 } from "lucide-react";
+import { Activity, Maximize2, Minus, Plus, RotateCcw, Share2 } from "lucide-react";
 import { Case, GraphEdge, GraphNode, get, qs } from "../api";
 import { useLoad, utc } from "../lib";
 import { Badge, Button, Empty, ErrorNote, Input, Kv, Loading, PageHeader, Panel, Select, cx } from "../ui";
 import ForceGraph, { ForceGraphHandle } from "../components/ForceGraph";
+import { ENTITY_TYPES, TYPE_COLOR } from "../graphColors";
 
-const STYLE: Record<string, { color: string }> = {
-  domain: { color: "#B7F36B" },
-  ip: { color: "#9FB4A3" },
-  url: { color: "#7FA07A" },
-  hash: { color: "#849487" },
-  certificate: { color: "#D6A64F" },
-  case: { color: "#E5ECE5" },
-  evidence: { color: "#6F9A64" },
-  indicator: { color: "#F06464" },
-};
-const TYPES = Object.keys(STYLE);
+const STYLE: Record<string, { color: string }> = Object.fromEntries(Object.entries(TYPE_COLOR).map(([k, color]) => [k, { color }]));
+const TYPES = ENTITY_TYPES;
 
 export default function Graph() {
   const [sp, setSp] = useSearchParams();
@@ -25,6 +17,7 @@ export default function Graph() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   const fg = useRef<ForceGraphHandle>(null);
+  const [animate, setAnimate] = useState(true);
   const cases = useLoad(() => get<Case[]>("/cases"), []);
   const g = useLoad(() => get<{ nodes: GraphNode[]; edges: GraphEdge[] }>(`/graph${qs({ case_id: caseId })}`), [caseId]);
 
@@ -50,6 +43,7 @@ export default function Graph() {
             <Select aria-label="Scope graph to case" value={caseId ?? ""} onChange={(e) => setSp(e.target.value ? { case: e.target.value } : {})} className="!w-56"><option value="">ALL ENTITIES</option>{(cases.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.ref} — {c.name}</option>)}</Select>
             <Input aria-label="Find entity" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find entity…" className="mono !w-44" />
             <div className="ml-auto flex gap-1.5">
+              <Button small aria-pressed={animate} aria-label="Toggle relationship motion" variant={animate ? "primary" : "ghost"} icon={<Activity size={12} />} onClick={() => setAnimate(!animate)}>Motion</Button>
               <Button small aria-label="Zoom in" icon={<Plus size={12} />} onClick={() => fg.current?.zoomBy(1.3)} />
               <Button small aria-label="Zoom out" icon={<Minus size={12} />} onClick={() => fg.current?.zoomBy(1 / 1.3)} />
               <Button small aria-label="Fit graph" icon={<Maximize2 size={12} />} onClick={() => fg.current?.fit()}>Fit</Button>
@@ -65,7 +59,7 @@ export default function Graph() {
           </div>
           <div className="relative h-[560px]">
             <div className="bg-grid absolute inset-0">
-              <ForceGraph handle={fg} nodes={gnodes} edges={gedges} selected={selected} onSelect={setSelected} query={query} />
+              <ForceGraph handle={fg} nodes={gnodes} edges={gedges} selected={selected} onSelect={setSelected} query={query} animate={animate} />
             </div>
             {g.loading && !g.data && <div className="absolute inset-0"><Loading /></div>}
             {g.error && <div className="absolute inset-x-3 top-3"><ErrorNote message={g.error} onRetry={g.reload} /></div>}

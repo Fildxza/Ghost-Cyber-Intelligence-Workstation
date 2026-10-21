@@ -6,6 +6,7 @@ import App from "./App";
 import CaseFormModal from "./components/CaseForm";
 import { Modal } from "./ui";
 
+vi.mock("./components/ForceGraph", () => ({ default: ({ nodes }: { nodes: unknown[] }) => <div data-testid="graph">graph:{nodes.length}</div> }));
 vi.mock("./components/MapPanel", () => ({ default: ({ points }: { points: unknown[] }) => <div data-testid="map">map:{points.length}</div> }));
 
 const status = {
@@ -101,6 +102,30 @@ describe("Command Centre", () => {
     expect(screen.getByText("critical")).toBeInTheDocument();
     expect(screen.getByText("failed")).toBeInTheDocument();
     expect(screen.getByText("case.create")).toBeInTheDocument();
+  });
+});
+
+describe("Topology view", () => {
+  it("switches to the topology tab and shows an honest empty state when nothing is recorded", async () => {
+    mockApi({ ...base, "/api/graph": () => json({ nodes: [], edges: [] }) });
+    renderApp();
+    fireEvent.click(await screen.findByRole("tab", { name: /topology/i }));
+    expect(await screen.findByText("No topology recorded yet")).toBeInTheDocument();
+    expect(screen.queryByTestId("map")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /geo map/i }));
+    expect(await screen.findByTestId("map")).toBeInTheDocument();
+  });
+
+  it("renders real recorded entities with the not-live-traffic disclaimer", async () => {
+    const nodes = [{ id: 1, type: "domain", key: "example.com", label: "example.com", props: {}, created_at: new Date().toISOString() },
+      { id: 2, type: "ip", key: "93.184.216.34", label: "93.184.216.34", props: {}, created_at: "2026-01-01T00:00:00Z" }];
+    mockApi({ ...base, "/api/graph": () => json({ nodes, edges: [{ id: 1, src_id: 1, dst_id: 2, rel_type: "resolves_to", source: "DNS", evidence_ref: null, created_at: "x" }] }) });
+    renderApp();
+    fireEvent.click(await screen.findByRole("tab", { name: /topology/i }));
+    expect(await screen.findByTestId("graph")).toHaveTextContent("graph:2");
+    expect(screen.getByText(/2 NODES · 1 LINKS/)).toBeInTheDocument();
+    expect(screen.getByText(/1 RECORDED IN LAST 15 MIN/)).toBeInTheDocument();
+    expect(screen.getByText(/NOT LIVE TRAFFIC/)).toBeInTheDocument();
   });
 });
 
